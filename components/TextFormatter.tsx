@@ -9,7 +9,9 @@ import {
   Alert,
   Platform,
   Share,
+  Modal,
 } from 'react-native';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ViewShot from 'react-native-view-shot';
 import * as FileSystem from 'expo-file-system';
@@ -24,7 +26,11 @@ import {
   AlignRight,
   Download,
   ArrowLeft,
+  PenTool,
+  X,
+  RotateCcw,
 } from 'lucide-react-native';
+import Svg, { Path } from 'react-native-svg';
 
 interface TextFormatterProps {
   initialText: string;
@@ -50,6 +56,17 @@ interface TextSegment {
   style: TextStyle;
 }
 
+interface SignaturePoint {
+  x: number;
+  y: number;
+}
+
+interface Signature {
+  points: SignaturePoint[];
+  color: string;
+  strokeWidth: number;
+}
+
 const FONT_SIZES = {
   small: 14,
   medium: 16,
@@ -69,6 +86,11 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
   const [segments, setSegments] = useState<TextSegment[]>([{ text: initialText, style: {} }]);
   const [currentStyle, setCurrentStyle] = useState<TextStyle>({});
   const [isExporting, setIsExporting] = useState(false);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [signatures, setSignatures] = useState<Signature[]>([]);
+  const [currentSignature, setCurrentSignature] = useState<Signature | null>(null);
+  const [signatureColor, setSignatureColor] = useState('#000000');
+  const [signatureStrokeWidth, setSignatureStrokeWidth] = useState(3);
   const viewShotRef = useRef<ViewShot>(null);
   const textInputRef = useRef<TextInput>(null);
   const [selectionStart, setSelectionStart] = useState(0);
@@ -155,6 +177,24 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
         
         return html;
       }).join('');
+
+      // Add signatures to HTML if any exist
+      let signaturesHtml = '';
+      if (signatures.length > 0) {
+        signaturesHtml = '<div style="margin-top: 40px; text-align: right;">';
+        signatures.forEach((signature, index) => {
+          const svgPath = signature.points.map((point, i) => 
+            i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+          ).join(' ');
+          
+          signaturesHtml += `
+            <svg width="120" height="60" style="margin-bottom: 20px;">
+              <path d="${svgPath}" stroke="${signature.color}" stroke-width="${signature.strokeWidth}" fill="none"/>
+            </svg>
+          `;
+        });
+        signaturesHtml += '</div>';
+      }
       
       const htmlContent = `
         <!DOCTYPE html>
@@ -176,7 +216,7 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
           </style>
         </head>
         <body>
-          <div class="content">${htmlSegments}</div>
+          <div class="content">${htmlSegments}${signaturesHtml}</div>
         </body>
         </html>
       `;
@@ -277,6 +317,74 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
       ],
       { cancelable: true }
     );
+  };
+
+  const openSignatureModal = () => {
+    setShowSignatureModal(true);
+    setCurrentSignature({ points: [], color: signatureColor, strokeWidth: signatureStrokeWidth });
+  };
+
+  const updateCurrentSignatureColor = (color: string) => {
+    setSignatureColor(color);
+    setCurrentSignature(prev => {
+      if (!prev) return prev;
+      return { ...prev, color };
+    });
+  };
+
+  const updateCurrentSignatureWidth = (width: number) => {
+    setSignatureStrokeWidth(width);
+    setCurrentSignature(prev => {
+      if (!prev) return prev;
+      return { ...prev, strokeWidth: width };
+    });
+  };
+
+  const closeSignatureModal = () => {
+    setShowSignatureModal(false);
+    setCurrentSignature(null);
+  };
+
+  const clearSignature = () => {
+    setCurrentSignature({ points: [], color: signatureColor, strokeWidth: signatureStrokeWidth });
+  };
+
+  const saveSignature = () => {
+    if (currentSignature && currentSignature.points.length > 0) {
+      setSignatures(prev => [...prev, currentSignature]);
+      closeSignatureModal();
+      Alert.alert('Success', 'Signature added to document!');
+    } else {
+      Alert.alert('Error', 'Please draw a signature first.');
+    }
+  };
+
+  const removeSignature = (index: number) => {
+    setSignatures(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const onSignatureGestureStateChange = (event: any) => {
+    const { state, x, y } = event.nativeEvent;
+    
+    if (state === State.BEGAN) {
+      // Start a new stroke
+      setCurrentSignature(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          points: [{ x, y }]
+        };
+      });
+    } else if (state === State.ACTIVE) {
+      // Continue drawing
+      setCurrentSignature(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          points: [...prev.points, { x, y }]
+        };
+      });
+    }
   };
 
   return (
@@ -449,6 +557,47 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Signature */}
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>Signature</Text>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.signatureButton}
+                onPress={openSignatureModal}
+              >
+                <PenTool size={16} color="#0066CC" />
+                <Text style={styles.signatureButtonText}>Add Signature</Text>
+              </TouchableOpacity>
+            </View>
+            {signatures.length > 0 && (
+              <View style={styles.signaturesList}>
+                <Text style={styles.signaturesTitle}>Added Signatures ({signatures.length})</Text>
+                {signatures.map((signature, index) => (
+                  <View key={index} style={styles.signatureItem}>
+                    <View style={styles.signaturePreview}>
+                      <Svg width={60} height={30} style={styles.signatureSvg}>
+                        <Path
+                          d={signature.points.map((point, i) => 
+                            i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+                          ).join(' ')}
+                          stroke={signature.color}
+                          strokeWidth={signature.strokeWidth}
+                          fill="none"
+                        />
+                      </Svg>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.removeSignatureButton}
+                      onPress={() => removeSignature(index)}
+                    >
+                      <X size={14} color="#FF3B30" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
         </View>
 
         {/* Text Editor */}
@@ -508,9 +657,113 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
                   );
                 }) : 'Your formatted text will appear here...'}
               </Text>
+              
+              {/* Signatures */}
+              {signatures.length > 0 && (
+                <View style={styles.signaturesContainer}>
+                  {signatures.map((signature, index) => (
+                    <Svg key={index} width={120} height={60} style={styles.signatureInPreview}>
+                      <Path
+                        d={signature.points.map((point, i) => 
+                          i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+                        ).join(' ')}
+                        stroke={signature.color}
+                        strokeWidth={signature.strokeWidth}
+                        fill="none"
+                      />
+                    </Svg>
+                  ))}
+                </View>
+              )}
             </View>
           </ViewShot>
         </View>
+
+        {/* Signature Modal */}
+        <Modal
+          visible={showSignatureModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+        >
+          <SafeAreaView style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={closeSignatureModal} style={styles.modalCloseButton}>
+                <X size={24} color="#000000" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Add Signature</Text>
+              <TouchableOpacity onPress={saveSignature} style={styles.modalSaveButton}>
+                <Text style={styles.modalSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.signatureCanvasContainer}>
+              <Text style={styles.signatureInstructions}>
+                Draw your signature below
+              </Text>
+              
+              <View style={styles.signatureControls}>
+                <View style={styles.signatureControlGroup}>
+                  <Text style={styles.signatureControlLabel}>Color</Text>
+                                     <View style={styles.colorPicker}>
+                     {['#000000', '#0066CC', '#FF3B30', '#34C759', '#AF52DE'].map((color) => (
+                       <TouchableOpacity
+                         key={color}
+                         style={[
+                           styles.colorOption,
+                           { backgroundColor: color },
+                           signatureColor === color && styles.colorOptionActive,
+                         ]}
+                         onPress={() => updateCurrentSignatureColor(color)}
+                       />
+                     ))}
+                   </View>
+                </View>
+                
+                <View style={styles.signatureControlGroup}>
+                  <Text style={styles.signatureControlLabel}>Thickness</Text>
+                                     <View style={styles.thicknessSlider}>
+                     {[1, 2, 3, 4, 5].map((width) => (
+                       <TouchableOpacity
+                         key={width}
+                         style={[
+                           styles.thicknessOption,
+                           signatureStrokeWidth === width && styles.thicknessOptionActive,
+                         ]}
+                         onPress={() => updateCurrentSignatureWidth(width)}
+                       >
+                         <View style={[styles.thicknessIndicator, { height: width }]} />
+                       </TouchableOpacity>
+                     ))}
+                   </View>
+                </View>
+              </View>
+              
+              <PanGestureHandler 
+                onHandlerStateChange={onSignatureGestureStateChange}
+              >
+                <View style={styles.signatureCanvas}>
+                  {currentSignature && currentSignature.points.length > 0 && (
+                    <Svg width="100%" height="100%" style={styles.signatureSvgCanvas}>
+                      <Path
+                        d={currentSignature.points.map((point, i) => 
+                          i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+                        ).join(' ')}
+                        stroke={currentSignature.color}
+                        strokeWidth={currentSignature.strokeWidth}
+                        fill="none"
+                      />
+                    </Svg>
+                  )}
+                </View>
+              </PanGestureHandler>
+              
+              <TouchableOpacity onPress={clearSignature} style={styles.clearSignatureButton}>
+                <RotateCcw size={16} color="#0066CC" />
+                <Text style={styles.clearSignatureText}>Clear</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -685,5 +938,177 @@ const styles = StyleSheet.create({
   previewText: {
     lineHeight: 24,
     color: '#000000',
+  },
+  signatureButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#0066CC',
+    backgroundColor: '#FFFFFF',
+    gap: 4,
+  },
+  signatureButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#0066CC',
+  },
+  signaturesList: {
+    marginTop: 12,
+  },
+  signaturesTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  signatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 4,
+  },
+  signaturePreview: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signatureSvg: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 4,
+  },
+  removeSignatureButton: {
+    padding: 4,
+  },
+  signaturesContainer: {
+    marginTop: 20,
+    alignItems: 'flex-end',
+  },
+  signatureInPreview: {
+    marginBottom: 10,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  modalCloseButton: {
+    padding: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  modalSaveButton: {
+    padding: 8,
+  },
+  modalSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0066CC',
+  },
+  signatureCanvasContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  signatureInstructions: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#000000',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  signatureControls: {
+    marginBottom: 20,
+  },
+  signatureControlGroup: {
+    marginBottom: 16,
+  },
+  signatureControlLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  colorPicker: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  colorOption: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#E5E5EA',
+  },
+  colorOptionActive: {
+    borderColor: '#0066CC',
+    borderWidth: 3,
+  },
+  thicknessSlider: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  thicknessOption: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#E5E5EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  thicknessOptionActive: {
+    borderColor: '#0066CC',
+    borderWidth: 3,
+  },
+  thicknessIndicator: {
+    width: 20,
+    backgroundColor: '#000000',
+    borderRadius: 1,
+  },
+  signatureCanvas: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  signatureSvgCanvas: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  clearSignatureButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    gap: 4,
+  },
+  clearSignatureText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#0066CC',
   },
 });
