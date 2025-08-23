@@ -15,13 +15,16 @@ import {
   ArrowLeft, 
   Check, 
   RotateCw, 
+  RotateCcw,
   Crop, 
   Palette,
   Sun,
   Contrast,
-  Filter
+  Filter,
+  RefreshCw
 } from 'lucide-react-native';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import Slider from '@react-native-community/slider';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const EDIT_AREA_HEIGHT = screenHeight * 0.6;
@@ -78,8 +81,19 @@ export default function ImageEditView({ imageUri, onSave, onCancel }: ImageEditV
     },
   });
 
-  const rotateImage = () => {
+  const rotateClockwise = () => {
     setRotation((prev) => (prev + 90) % 360);
+  };
+
+  const rotateCounterClockwise = () => {
+    setRotation((prev) => (prev - 90 + 360) % 360);
+  };
+
+  const resetAdjustments = () => {
+    setBrightness(1);
+    setContrast(1);
+    setCurrentFilter('none');
+    setRotation(0);
   };
 
   const toggleCrop = () => {
@@ -95,13 +109,7 @@ export default function ImageEditView({ imageUri, onSave, onCancel }: ImageEditV
     setCurrentFilter(filter);
   };
 
-  const adjustBrightness = (value: number) => {
-    setBrightness(Math.max(0.5, Math.min(2, value)));
-  };
 
-  const adjustContrast = (value: number) => {
-    setContrast(Math.max(0.5, Math.min(2, value)));
-  };
 
   const processImage = async () => {
     setIsProcessing(true);
@@ -185,13 +193,18 @@ export default function ImageEditView({ imageUri, onSave, onCancel }: ImageEditV
       transform: [{ rotate: `${rotation}deg` }],
     };
 
-    // Apply filter styles
-    const filterStyle: any = {};
+    // Apply visual preview of brightness/contrast (limited in RN)
+    const filterStyle: any = {
+      opacity: Math.max(0.3, Math.min(1, brightness * 0.8 + 0.2)),
+    };
     
+    // Apply filter tints for preview
     if (currentFilter === 'grayscale') {
       filterStyle.tintColor = '#888888';
     } else if (currentFilter === 'sepia') {
       filterStyle.tintColor = '#D2691E';
+    } else if (currentFilter === 'blackwhite') {
+      filterStyle.tintColor = '#666666';
     }
 
     return [baseStyle, filterStyle];
@@ -256,9 +269,19 @@ export default function ImageEditView({ imageUri, onSave, onCancel }: ImageEditV
             <Text style={[styles.toolText, isCropping && styles.toolTextActive]}>Crop</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.toolButton} onPress={rotateImage}>
+          <TouchableOpacity style={styles.toolButton} onPress={rotateCounterClockwise}>
+            <RotateCcw size={20} color="#333" />
+            <Text style={styles.toolText}>Rotate L</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.toolButton} onPress={rotateClockwise}>
             <RotateCw size={20} color="#333" />
-            <Text style={styles.toolText}>Rotate</Text>
+            <Text style={styles.toolText}>Rotate R</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.toolButton} onPress={resetAdjustments}>
+            <RefreshCw size={20} color="#333" />
+            <Text style={styles.toolText}>Reset</Text>
           </TouchableOpacity>
         </View>
 
@@ -299,41 +322,39 @@ export default function ImageEditView({ imageUri, onSave, onCancel }: ImageEditV
           <View style={styles.adjustmentRow}>
             <Sun size={16} color="#666" />
             <Text style={styles.adjustmentLabel}>Brightness</Text>
-            <View style={styles.sliderContainer}>
-              <TouchableOpacity 
-                style={styles.adjustButton} 
-                onPress={() => adjustBrightness(brightness - 0.1)}
-              >
-                <Text style={styles.adjustButtonText}>-</Text>
-              </TouchableOpacity>
-              <Text style={styles.adjustValue}>{brightness.toFixed(1)}</Text>
-              <TouchableOpacity 
-                style={styles.adjustButton} 
-                onPress={() => adjustBrightness(brightness + 0.1)}
-              >
-                <Text style={styles.adjustButtonText}>+</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.adjustValue}>{brightness.toFixed(1)}</Text>
+          </View>
+          <View style={styles.sliderRow}>
+            <Slider
+              style={styles.slider}
+              minimumValue={0.5}
+              maximumValue={2.0}
+              value={brightness}
+              onValueChange={(value) => setBrightness(Math.max(0.5, Math.min(2.0, value)))}
+              minimumTrackTintColor="#0066CC"
+              maximumTrackTintColor="#E5E5E7"
+              thumbTintColor="#0066CC"
+              step={0.05}
+            />
           </View>
 
           <View style={styles.adjustmentRow}>
             <Contrast size={16} color="#666" />
             <Text style={styles.adjustmentLabel}>Contrast</Text>
-            <View style={styles.sliderContainer}>
-              <TouchableOpacity 
-                style={styles.adjustButton} 
-                onPress={() => adjustContrast(contrast - 0.1)}
-              >
-                <Text style={styles.adjustButtonText}>-</Text>
-              </TouchableOpacity>
-              <Text style={styles.adjustValue}>{contrast.toFixed(1)}</Text>
-              <TouchableOpacity 
-                style={styles.adjustButton} 
-                onPress={() => adjustContrast(contrast + 0.1)}
-              >
-                <Text style={styles.adjustButtonText}>+</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.adjustValue}>{contrast.toFixed(1)}</Text>
+          </View>
+          <View style={styles.sliderRow}>
+            <Slider
+              style={styles.slider}
+              minimumValue={0.5}
+              maximumValue={2.0}
+              value={contrast}
+              onValueChange={(value) => setContrast(Math.max(0.5, Math.min(2.0, value)))}
+              minimumTrackTintColor="#0066CC"
+              maximumTrackTintColor="#E5E5E7"
+              thumbTintColor="#0066CC"
+              step={0.05}
+            />
           </View>
         </View>
       </View>
@@ -437,16 +458,17 @@ const styles = StyleSheet.create({
   },
   mainTools: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     marginBottom: 24,
+    gap: 8,
   },
   toolButton: {
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: '#F2F2F7',
-    minWidth: 80,
+    flex: 1,
   },
   toolButtonActive: {
     backgroundColor: '#0066CC',
@@ -531,8 +553,17 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     minWidth: 32,
-    textAlign: 'center',
+    textAlign: 'right',
   },
+  sliderRow: {
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  slider: {
+    width: '100%',
+    height: 40,
+  },
+
   processingOverlay: {
     position: 'absolute',
     top: 0,
