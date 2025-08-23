@@ -15,6 +15,10 @@ import ScannerHeader from "@/components/scanner/ScannerHeader";
 import EmptyState from "@/components/scanner/EmptyState";
 import ImageScanView from "@/components/scanner/ImageScanView";
 import ResultsView from "@/components/scanner/ResultsView";
+import PageThumbnails from "@/components/scanner/PageThumbnails";
+import MultiPageView from "@/components/scanner/MultiPageView";
+import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
+import { DocumentPage } from "@/types/scan";
 
 
 
@@ -25,6 +29,9 @@ export default function ScannerScreen() {
   const [showFormatter, setShowFormatter] = useState(false);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
   const [isDocumentSaved, setIsDocumentSaved] = useState(false);
+  const [pages, setPages] = useState<DocumentPage[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
+  const [isMultiPageMode, setIsMultiPageMode] = useState(false);
   const { addDocument } = useDocuments();
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -50,29 +57,88 @@ export default function ScannerScreen() {
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
             aspect: [4, 3],
-            quality: 0.6, // Reduced for faster processing
+            quality: 0.6,
           })
         : await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
             aspect: [4, 3],
-            quality: 0.6, // Reduced for faster processing
+            quality: 0.6,
           });
 
       if (!result.canceled && result.assets[0]) {
-        setSelectedImage(result.assets[0].uri);
-        setExtractedText("");
-        setCurrentDocumentId(null);
-        setIsDocumentSaved(false);
-        
-        // Automatically start text extraction after image selection
-        setTimeout(() => {
-          extractTextFromImage(result.assets[0].uri);
-        }, 100); // Small delay to ensure state is updated
+        if (pages.length === 0) {
+          // First image - single page mode
+          setSelectedImage(result.assets[0].uri);
+          setExtractedText("");
+          setCurrentDocumentId(null);
+          setIsDocumentSaved(false);
+          
+          // Automatically start text extraction after image selection
+          setTimeout(() => {
+            extractTextFromImage(result.assets[0].uri);
+          }, 100);
+        } else {
+          // Adding to existing multi-page document
+          addPageToDocument(result.assets[0].uri);
+        }
       }
     } catch (error) {
       console.error("Error picking image:", error);
       Alert.alert("Error", "Failed to select image. Please try again.");
+    }
+  };
+
+  const addPageToDocument = (imageUri: string) => {
+    const newPage: DocumentPage = {
+      id: Date.now().toString(),
+      imageUri,
+      order: pages.length,
+    };
+    
+    const updatedPages = [...pages, newPage];
+    setPages(updatedPages);
+    setSelectedPageId(newPage.id);
+    
+    if (!isMultiPageMode) {
+      setIsMultiPageMode(true);
+    }
+  };
+
+  const deletePageFromDocument = (pageId: string) => {
+    const updatedPages = pages.filter(page => page.id !== pageId);
+    setPages(updatedPages);
+    
+    if (updatedPages.length === 0) {
+      setIsMultiPageMode(false);
+      setSelectedPageId(null);
+    } else if (selectedPageId === pageId) {
+      setSelectedPageId(updatedPages[0].id);
+    }
+  };
+
+  const reorderPages = (newPages: DocumentPage[]) => {
+    setPages(newPages);
+  };
+
+  const selectPage = (pageId: string) => {
+    setSelectedPageId(pageId);
+  };
+
+  const convertToMultiPage = () => {
+    if (selectedImage) {
+      const firstPage: DocumentPage = {
+        id: Date.now().toString(),
+        imageUri: selectedImage,
+        extractedText: extractedText || undefined,
+        order: 0,
+      };
+      
+      setPages([firstPage]);
+      setSelectedPageId(firstPage.id);
+      setIsMultiPageMode(true);
+      setSelectedImage(null);
+      setExtractedText("");
     }
   };
 
@@ -218,6 +284,94 @@ export default function ScannerScreen() {
     await extractTextFromImage(selectedImage);
   };
 
+  const extractAllPagesText = async () => {
+    if (pages.length === 0) return;
+    
+    setIsLoading(true);
+    
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        if (!page.extractedText) {
+          console.log(`Processing page ${i + 1} of ${pages.length}`);
+          
+          const response = await fetch(page.imageUri);
+          const blob = await response.blob();
+          
+          const base64Data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.split(',')[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          
+          const aiResponse = await fetch("https://toolkit.rork.com/text/llm/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: "Extract text from this image quickly. Return only the text content, no formatting or commentary.",
+                    },
+                    {
+                      type: "image",
+                      image: base64Data,
+                    },
+                  ],
+                },
+              ],
+            }),
+          });
+          
+          if (!aiResponse.ok) {
+            throw new Error(`AI API error: ${aiResponse.status}`);
+          }
+          
+          const data = await aiResponse.json();
+          const text = data.completion || "No text detected";
+          
+          // Update the page with extracted text
+          setPages(prevPages => 
+            prevPages.map(p => 
+              p.id === page.id ? { ...p, extractedText: text } : p
+            )
+          );
+        }
+      }
+      
+      // Success animation
+      Animated.sequence([
+        Animated.timing(sparkleAnim, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
+    } catch (error: any) {
+      console.error("Error extracting text from pages:", error);
+      Alert.alert("Error", "Failed to extract text from some pages. Please try again.");
+    } finally {
+      setIsLoading(false);
+      pulseAnim.stopAnimation();
+      pulseAnim.setValue(1);
+    }
+  };
+
   const generateDocumentTitle = (text: string): string => {
     // Take the first meaningful line or first 50 characters
     const lines = text.trim().split('\n');
@@ -233,7 +387,17 @@ export default function ScannerScreen() {
   };
 
   const copyToClipboard = async () => {
-    if (extractedText) {
+    if (isMultiPageMode) {
+      const combinedText = pages
+        .filter(page => page.extractedText)
+        .map((page, index) => `--- Page ${index + 1} ---\n${page.extractedText}`)
+        .join('\n\n');
+      
+      if (combinedText) {
+        await Clipboard.setStringAsync(combinedText);
+        Alert.alert("Copied", "Combined text from all pages copied to clipboard!");
+      }
+    } else if (extractedText) {
       await Clipboard.setStringAsync(extractedText);
       Alert.alert("Copied", "Text copied to clipboard!");
     }
@@ -245,6 +409,9 @@ export default function ScannerScreen() {
     setShowFormatter(false);
     setCurrentDocumentId(null);
     setIsDocumentSaved(false);
+    setPages([]);
+    setSelectedPageId(null);
+    setIsMultiPageMode(false);
     
     // Reset animations
     sparkleAnim.setValue(0);
@@ -253,7 +420,17 @@ export default function ScannerScreen() {
   };
 
   const openFormatter = () => {
-    if (extractedText) {
+    if (isMultiPageMode) {
+      const combinedText = pages
+        .filter(page => page.extractedText)
+        .map((page, index) => `--- Page ${index + 1} ---\n${page.extractedText}`)
+        .join('\n\n');
+      
+      if (combinedText) {
+        setExtractedText(combinedText);
+        setShowFormatter(true);
+      }
+    } else if (extractedText) {
       setShowFormatter(true);
     }
   };
@@ -272,6 +449,50 @@ export default function ScannerScreen() {
     );
   }
 
+  // Multi-page mode rendering
+  if (isMultiPageMode) {
+    const allPagesProcessed = pages.every(page => page.extractedText);
+    const hasExtractedText = pages.some(page => page.extractedText);
+    
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScannerHeader />
+
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          <PageThumbnails
+            pages={pages}
+            onAddPage={pickImage}
+            onDeletePage={deletePageFromDocument}
+            onReorderPages={reorderPages}
+            selectedPageId={selectedPageId || undefined}
+            onSelectPage={selectPage}
+          />
+          
+          <MultiPageView
+            pages={pages}
+            selectedPageId={selectedPageId || undefined}
+            isProcessing={isLoading}
+            onExtractAllText={extractAllPagesText}
+            onBack={() => setIsMultiPageMode(false)}
+            pulseAnim={pulseAnim}
+          />
+          
+          {allPagesProcessed && hasExtractedText && (
+            <MultiPageResultsView
+              pages={pages}
+              onOpenFormatter={openFormatter}
+              onCopyToClipboard={copyToClipboard}
+              onClearScan={clearScan}
+              sparkleAnim={sparkleAnim}
+              slideAnim={slideAnim}
+            />
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // Single page mode rendering
   return (
     <SafeAreaView style={styles.container}>
       <ScannerHeader />
@@ -300,6 +521,7 @@ export default function ScannerScreen() {
                 onOpenFormatter={openFormatter}
                 onCopyToClipboard={copyToClipboard}
                 onClearScan={clearScan}
+                onConvertToMultiPage={convertToMultiPage}
                 sparkleAnim={sparkleAnim}
                 slideAnim={slideAnim}
               />
