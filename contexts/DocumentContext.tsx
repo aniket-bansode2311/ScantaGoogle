@@ -1,49 +1,117 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { documents, Document } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
 
 interface DocumentContextType {
   documents: Document[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  totalCount: number;
   addDocument: (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => Promise<{ data: Document | null; error: any }>;
   updateDocument: (id: string, updates: Partial<Document>) => Promise<{ data: Document | null; error: any }>;
   deleteDocument: (id: string) => Promise<void>;
   clearAllDocuments: () => Promise<void>;
   refreshDocuments: () => Promise<void>;
+  loadMoreDocuments: () => Promise<void>;
   searchDocuments: (query: string) => Promise<Document[]>;
 }
 
 const DocumentContext = createContext<DocumentContextType | undefined>(undefined);
 
+const DOCUMENTS_PER_PAGE = 15;
+
 export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
 
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async (reset: boolean = true) => {
     if (!user) {
       setDocs([]);
+      setTotalCount(0);
+      setHasMore(false);
       return;
     }
 
-    setLoading(true);
+    if (reset) {
+      setLoading(true);
+      setDocs([]);
+    }
+
     try {
-      const { data, error } = await documents.getAll(user.id);
+      const offset = reset ? 0 : docs.length;
+      
+      // Get total count
+      const { count } = await documents.getCount(user.id);
+      setTotalCount(count || 0);
+      
+      // Get documents for current page
+      const { data, error } = await documents.getAll(user.id, {
+        limit: DOCUMENTS_PER_PAGE,
+        offset
+      });
+      
       if (error) {
         console.error('Error loading documents:', error);
       } else {
-        setDocs(data || []);
+        const newDocs = data || [];
+        if (reset) {
+          setDocs(newDocs);
+        } else {
+          setDocs(prev => [...prev, ...newDocs]);
+        }
+        
+        // Check if there are more documents to load
+        const totalLoaded = reset ? newDocs.length : docs.length + newDocs.length;
+        setHasMore(totalLoaded < (count || 0));
       }
     } catch (error) {
       console.error('Error loading documents:', error);
     } finally {
-      setLoading(false);
+      if (reset) {
+        setLoading(false);
+      }
+    }
+  }, [user, docs.length]);
+
+  const loadMoreDocuments = async () => {
+    if (!user || loadingMore || !hasMore) {
+      return;
+    }
+
+    setLoadingMore(true);
+    try {
+      const offset = docs.length;
+      
+      const { data, error } = await documents.getAll(user.id, {
+        limit: DOCUMENTS_PER_PAGE,
+        offset
+      });
+      
+      if (error) {
+        console.error('Error loading more documents:', error);
+      } else {
+        const newDocs = data || [];
+        setDocs(prev => [...prev, ...newDocs]);
+        
+        // Check if there are more documents to load
+        const totalLoaded = docs.length + newDocs.length;
+        setHasMore(totalLoaded < totalCount);
+      }
+    } catch (error) {
+      console.error('Error loading more documents:', error);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
     loadDocuments();
-  }, [user]);
+  }, [user, loadDocuments]);
 
   const addDocument = async (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
     if (!user) {
@@ -124,7 +192,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshDocuments = async () => {
-    await loadDocuments();
+    await loadDocuments(true);
   };
 
   const searchDocuments = async (query: string): Promise<Document[]> => {
@@ -148,11 +216,15 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const value: DocumentContextType = {
     documents: docs,
     loading,
+    loadingMore,
+    hasMore,
+    totalCount,
     addDocument,
     updateDocument,
     deleteDocument,
     clearAllDocuments,
     refreshDocuments,
+    loadMoreDocuments,
     searchDocuments,
   };
 

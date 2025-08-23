@@ -227,17 +227,40 @@ export const documents = {
     }
   },
 
-  getAll: async (userId: string) => {
+  getAll: async (userId: string, options?: { limit?: number; offset?: number }) => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('documents')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
+      
+      if (options?.limit) {
+        query = query.limit(options.limit);
+      }
+      
+      if (options?.offset) {
+        query = query.range(options.offset, options.offset + (options.limit || 10) - 1);
+      }
+      
+      const { data, error } = await query;
       return { data, error };
     } catch (err) {
       console.error('Documents fetch error:', err);
       return { data: null, error: { message: 'Failed to fetch documents' } };
+    }
+  },
+
+  getCount: async (userId: string) => {
+    try {
+      const { count, error } = await supabase
+        .from('documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId);
+      return { count, error };
+    } catch (err) {
+      console.error('Documents count error:', err);
+      return { count: null, error: { message: 'Failed to get document count' } };
     }
   },
 

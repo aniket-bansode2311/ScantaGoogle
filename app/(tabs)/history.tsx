@@ -10,9 +10,10 @@ import {
   Dimensions,
   TextInput,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Trash2, Copy, FileText, Edit3, Search, Clock, Calendar } from "lucide-react-native";
+import { Trash2, Copy, FileText, Edit3, Search, Clock, Calendar, ChevronDown } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import { useDocuments } from "@/contexts/DocumentContext";
 import { Document } from "@/lib/supabase";
@@ -21,7 +22,16 @@ import TextFormatter from "@/components/TextFormatter";
 const { width } = Dimensions.get('window');
 
 export default function HistoryScreen() {
-  const { documents, loading, deleteDocument, refreshDocuments } = useDocuments();
+  const { 
+    documents, 
+    loading, 
+    loadingMore, 
+    hasMore, 
+    totalCount,
+    deleteDocument, 
+    refreshDocuments,
+    loadMoreDocuments 
+  } = useDocuments();
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [showFormatter, setShowFormatter] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -233,6 +243,48 @@ export default function HistoryScreen() {
     );
   };
 
+  const renderFooter = () => {
+    // Don't show footer when searching (search shows all results)
+    if (searchQuery.trim().length > 0) {
+      return null;
+    }
+
+    // Don't show footer if no documents or no more to load
+    if (documents.length === 0) {
+      return null;
+    }
+
+    return (
+      <View style={styles.footerContainer}>
+        {hasMore ? (
+          <TouchableOpacity 
+            style={styles.loadMoreButton}
+            onPress={loadMoreDocuments}
+            disabled={loadingMore}
+          >
+            {loadingMore ? (
+              <View style={styles.loadMoreContent}>
+                <ActivityIndicator size="small" color="#0066CC" />
+                <Text style={styles.loadMoreText}>Loading...</Text>
+              </View>
+            ) : (
+              <View style={styles.loadMoreContent}>
+                <ChevronDown size={20} color="#0066CC" />
+                <Text style={styles.loadMoreText}>Load More Documents</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.endOfListContainer}>
+            <View style={styles.endOfListLine} />
+            <Text style={styles.endOfListText}>You've reached the end</Text>
+            <View style={styles.endOfListLine} />
+          </View>
+        )}
+      </View>
+    );
+  };
+
   if (showFormatter && selectedDocument) {
     return (
       <TextFormatter
@@ -290,8 +342,10 @@ export default function HistoryScreen() {
         {filteredDocuments.length > 0 && (
           <View style={styles.statsContainer}>
             <Text style={styles.statsText}>
-              {filteredDocuments.length} document{filteredDocuments.length !== 1 ? 's' : ''}
-              {searchQuery ? ` found` : ` total`}
+              {searchQuery 
+                ? `${filteredDocuments.length} document${filteredDocuments.length !== 1 ? 's' : ''} found`
+                : `Showing ${documents.length} of ${totalCount} document${totalCount !== 1 ? 's' : ''}`
+              }
             </Text>
           </View>
         )}
@@ -303,6 +357,7 @@ export default function HistoryScreen() {
         keyExtractor={([dateString]) => dateString}
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={renderEmptyState}
+        ListFooterComponent={renderFooter}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -616,5 +671,53 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
     marginBottom: 6,
     lineHeight: 24,
+  },
+  footerContainer: {
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    alignItems: "center",
+  },
+  loadMoreButton: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+    minWidth: 200,
+  },
+  loadMoreContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  loadMoreText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0066CC",
+  },
+  endOfListContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 20,
+    gap: 12,
+  },
+  endOfListLine: {
+    height: 1,
+    backgroundColor: "#E8E8E8",
+    flex: 1,
+  },
+  endOfListText: {
+    fontSize: 14,
+    color: "#6B7280",
+    fontWeight: "500",
+    paddingHorizontal: 12,
   },
 });
