@@ -5,6 +5,7 @@ import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DocumentProvider } from "@/contexts/DocumentContext";
+import { SignatureProvider } from "@/contexts/SignatureContext";
 import AuthGuard from "@/components/AuthGuard";
 import { trpc, trpcClient } from "@/lib/trpc";
 
@@ -32,11 +33,13 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <DocumentProvider>
-            <GestureHandlerRootView>
-              <AuthGuard>
-                <RootLayoutNav />
-              </AuthGuard>
-            </GestureHandlerRootView>
+            <SignatureProvider>
+              <GestureHandlerRootView>
+                <AuthGuard>
+                  <RootLayoutNav />
+                </AuthGuard>
+              </GestureHandlerRootView>
+            </SignatureProvider>
           </DocumentProvider>
         </AuthProvider>
       </QueryClientProvider>

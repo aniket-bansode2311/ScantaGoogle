@@ -10,6 +10,7 @@ export interface DocumentPage {
   imageUri: string;
   extractedText?: string;
   order: number;
+  signatures?: SignatureInstance[];
 }
 
 export interface MultiPageDocument {
@@ -18,4 +19,23 @@ export interface MultiPageDocument {
   pages: DocumentPage[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface SavedSignature {
+  id: string;
+  name: string;
+  svgPath: string;
+  width: number;
+  height: number;
+  createdAt: Date;
+}
+
+export interface SignatureInstance {
+  id: string;
+  signatureId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
 }

@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { Edit3, Copy, ArrowLeft, Sparkles, Plus } from 'lucide-react-native';
+import { Edit3, Copy, ArrowLeft, Sparkles, Plus, PenTool } from 'lucide-react-native';
 
 interface ResultsViewProps {
   extractedText: string;
@@ -15,6 +15,7 @@ interface ResultsViewProps {
   onCopyToClipboard: () => void;
   onClearScan: () => void;
   onConvertToMultiPage: () => void;
+  onAddSignature?: () => void;
   sparkleAnim: Animated.Value;
   slideAnim: Animated.Value;
 }
@@ -26,6 +27,7 @@ export default function ResultsView({
   onCopyToClipboard,
   onClearScan,
   onConvertToMultiPage,
+  onAddSignature,
   sparkleAnim,
   slideAnim,
 }: ResultsViewProps) {
@@ -80,6 +82,15 @@ export default function ResultsView({
           <Plus size={18} color="#FF9500" />
           <Text style={[styles.fullWidthActionButtonText, { color: '#FF9500' }]}>Add More Pages</Text>
         </TouchableOpacity>
+        {onAddSignature && (
+          <TouchableOpacity
+            style={[styles.fullWidthActionButton, styles.signatureActionButton]}
+            onPress={onAddSignature}
+          >
+            <PenTool size={18} color="#8B5CF6" />
+            <Text style={[styles.fullWidthActionButtonText, { color: '#8B5CF6' }]}>Add Signature</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[styles.fullWidthActionButton, styles.backActionButton]}
           onPress={onClearScan}
@@ -178,6 +189,9 @@ const styles = StyleSheet.create({
   },
   backActionButton: {
     backgroundColor: "#FFE8E8",
+  },
+  signatureActionButton: {
+    backgroundColor: "#F3E8FF",
   },
   textContainer: {
     backgroundColor: "#F8F9FA",

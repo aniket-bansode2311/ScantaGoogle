@@ -19,7 +19,8 @@ import PageThumbnails from "@/components/scanner/PageThumbnails";
 import MultiPageView from "@/components/scanner/MultiPageView";
 import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
 import ImageEditView from "@/components/scanner/ImageEditView";
-import { DocumentPage } from "@/types/scan";
+import SignatureManager from "@/components/signature/SignatureManager";
+import { DocumentPage, SignatureInstance } from "@/types/scan";
 
 
 
@@ -35,6 +36,9 @@ export default function ScannerScreen() {
   const [isMultiPageMode, setIsMultiPageMode] = useState(false);
   const [showImageEditor, setShowImageEditor] = useState(false);
   const [imageToEdit, setImageToEdit] = useState<string | null>(null);
+  const [showSignatureManager, setShowSignatureManager] = useState(false);
+  const [signatureMode, setSignatureMode] = useState<'create' | 'library' | 'overlay'>('library');
+  const [documentSignatures, setDocumentSignatures] = useState<SignatureInstance[]>([]);
   const { addDocument } = useDocuments();
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -453,6 +457,8 @@ export default function ScannerScreen() {
     setIsMultiPageMode(false);
     setShowImageEditor(false);
     setImageToEdit(null);
+    setShowSignatureManager(false);
+    setDocumentSignatures([]);
     
     // Reset animations
     sparkleAnim.setValue(0);
@@ -479,6 +485,41 @@ export default function ScannerScreen() {
   const closeFormatter = () => {
     setShowFormatter(false);
   };
+
+  const handleAddSignature = () => {
+    setSignatureMode('library');
+    setShowSignatureManager(true);
+  };
+
+  const handleSignatureSave = (svgPath: string, width: number, height: number) => {
+    console.log('Signature saved:', { svgPath, width, height });
+    setShowSignatureManager(false);
+    // Here you could add the signature to the document or show a success message
+  };
+
+  const handleSignatureCancel = () => {
+    setShowSignatureManager(false);
+  };
+
+  const handleSignaturesSave = (signatures: SignatureInstance[]) => {
+    setDocumentSignatures(signatures);
+    setShowSignatureManager(false);
+    console.log('Document signatures updated:', signatures);
+  };
+
+  // Show signature manager
+  if (showSignatureManager) {
+    return (
+      <SignatureManager
+        mode={signatureMode}
+        imageUri={selectedImage || undefined}
+        existingSignatures={documentSignatures}
+        onSave={handleSignatureSave}
+        onSaveSignatures={handleSignaturesSave}
+        onCancel={handleSignatureCancel}
+      />
+    );
+  }
 
   // Show image editor
   if (showImageEditor && imageToEdit) {
@@ -576,6 +617,7 @@ export default function ScannerScreen() {
                 onCopyToClipboard={copyToClipboard}
                 onClearScan={clearScan}
                 onConvertToMultiPage={convertToMultiPage}
+                onAddSignature={handleAddSignature}
                 sparkleAnim={sparkleAnim}
                 slideAnim={slideAnim}
               />
