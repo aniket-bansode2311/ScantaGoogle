@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { DocumentProvider } from "@/contexts/DocumentContext";
 import { SignatureProvider } from "@/contexts/SignatureContext";
 import { OCRSettingsProvider } from "@/contexts/OCRSettingsContext";
+import { CloudSyncProvider } from "@/contexts/CloudSyncContext";
 import AuthGuard from "@/components/AuthGuard";
 import { trpc, trpcClient } from "@/lib/trpc";
 
@@ -34,15 +35,17 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <DocumentProvider>
-            <SignatureProvider>
-              <OCRSettingsProvider>
-                <GestureHandlerRootView>
-                  <AuthGuard>
-                    <RootLayoutNav />
-                  </AuthGuard>
-                </GestureHandlerRootView>
-              </OCRSettingsProvider>
-            </SignatureProvider>
+            <CloudSyncProvider>
+              <SignatureProvider>
+                <OCRSettingsProvider>
+                  <GestureHandlerRootView>
+                    <AuthGuard>
+                      <RootLayoutNav />
+                    </AuthGuard>
+                  </GestureHandlerRootView>
+                </OCRSettingsProvider>
+              </SignatureProvider>
+            </CloudSyncProvider>
           </DocumentProvider>
         </AuthProvider>
       </QueryClientProvider>

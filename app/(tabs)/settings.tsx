@@ -9,11 +9,12 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ChevronRight, Info, Trash2, Star, LogOut, User, Settings as SettingsIcon, Shield, Globe } from "lucide-react-native";
+import { ChevronRight, Info, Trash2, Star, LogOut, User, Settings as SettingsIcon, Shield, Globe, Cloud } from "lucide-react-native";
 import { useDocuments } from "@/contexts/DocumentContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOCRSettings } from "@/contexts/OCRSettingsContext";
 import LanguageSelector from "@/components/LanguageSelector";
+import CloudSyncToggle from "@/components/CloudSyncToggle";
 
 export default function SettingsScreen() {
   const { clearAllDocuments, documents } = useDocuments();
@@ -134,6 +135,13 @@ export default function SettingsScreen() {
               onPress={handleSignOut}
               textColor="#FF3B30"
             />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Cloud Sync</Text>
+          <View style={styles.sectionContent}>
+            <CloudSyncToggle />
           </View>
         </View>
 
