@@ -63,6 +63,12 @@ export default function ScannerScreen() {
         setSelectedImage(result.assets[0].uri);
         setExtractedText("");
         setCurrentDocumentId(null);
+        setIsDocumentSaved(false);
+        
+        // Automatically start text extraction after image selection
+        setTimeout(() => {
+          extractTextFromImage(result.assets[0].uri);
+        }, 100); // Small delay to ensure state is updated
       }
     } catch (error) {
       console.error("Error picking image:", error);
@@ -70,8 +76,8 @@ export default function ScannerScreen() {
     }
   };
 
-  const extractText = async () => {
-    if (!selectedImage) return;
+  const extractTextFromImage = async (imageUri: string) => {
+    if (!imageUri) return;
     if (isLoading) return; // Prevent multiple simultaneous requests
     if (isDocumentSaved && extractedText) return; // Don't save again if already saved
 
@@ -97,7 +103,7 @@ export default function ScannerScreen() {
       console.log('Starting text extraction...');
       
       // Optimize image processing
-      const response = await fetch(selectedImage);
+      const response = await fetch(imageUri);
       const blob = await response.blob();
       
       // Use Promise-based approach for faster processing
@@ -179,7 +185,7 @@ export default function ScannerScreen() {
           addDocument({
             title,
             content: text,
-            image_url: selectedImage,
+            image_url: imageUri,
           }).then(({ data: document, error }) => {
             if (error) {
               console.error("Error saving document:", error);
@@ -205,6 +211,11 @@ export default function ScannerScreen() {
       pulseAnim.stopAnimation();
       pulseAnim.setValue(1);
     }
+  };
+
+  const extractText = async () => {
+    if (!selectedImage) return;
+    await extractTextFromImage(selectedImage);
   };
 
   const generateDocumentTitle = (text: string): string => {
