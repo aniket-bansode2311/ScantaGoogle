@@ -11,6 +11,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import { useDocuments } from "@/contexts/DocumentContext";
+import { useOCRSettings } from "@/contexts/OCRSettingsContext";
 import TextFormatter from "@/components/TextFormatter";
 import ScannerHeader from "@/components/scanner/ScannerHeader";
 import EmptyState from "@/components/scanner/EmptyState";
@@ -22,6 +23,7 @@ import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
 import ImageEditView from "@/components/scanner/ImageEditView";
 import SignatureManager from "@/components/signature/SignatureManager";
 import { DocumentPage, SignatureInstance } from "@/types/scan";
+import { OCRLanguage } from "@/contexts/OCRSettingsContext";
 
 
 
@@ -41,10 +43,24 @@ export default function ScannerScreen() {
   const [signatureMode, setSignatureMode] = useState<'create' | 'library' | 'overlay'>('library');
   const [documentSignatures, setDocumentSignatures] = useState<SignatureInstance[]>([]);
   const { addDocument } = useDocuments();
+  const { selectedLanguage } = useOCRSettings();
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const sparkleAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+
+  const getLanguagePrompt = (languageCode: OCRLanguage): string => {
+    const languageMap: Record<OCRLanguage, string> = {
+      'en': 'English',
+      'es': 'Spanish',
+      'fr': 'French',
+      'de': 'German',
+      'it': 'Italian',
+      'pt': 'Portuguese',
+      'auto': 'Auto-detect',
+    };
+    return languageMap[languageCode] || 'English';
+  };
 
   const pickImage = async (useCamera: boolean) => {
     try {
@@ -197,7 +213,7 @@ export default function ScannerScreen() {
               content: [
                 {
                   type: "text",
-                  text: "Extract text from this image quickly. Return only the text content, no formatting or commentary.",
+                  text: `Extract text from this image quickly. ${selectedLanguage !== 'auto' ? `The text is primarily in ${getLanguagePrompt(selectedLanguage)}.` : 'Auto-detect the language.'} Return only the text content, no formatting or commentary.`,
                 },
                 {
                   type: "image",
@@ -316,7 +332,7 @@ export default function ScannerScreen() {
                   content: [
                     {
                       type: "text",
-                      text: "Extract text from this image quickly. Return only the text content, no formatting or commentary.",
+                      text: `Extract text from this image quickly. ${selectedLanguage !== 'auto' ? `The text is primarily in ${getLanguagePrompt(selectedLanguage)}.` : 'Auto-detect the language.'} Return only the text content, no formatting or commentary.`,
                     },
                     {
                       type: "image",
