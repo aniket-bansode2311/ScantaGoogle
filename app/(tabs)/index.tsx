@@ -18,6 +18,7 @@ import ResultsView from "@/components/scanner/ResultsView";
 import PageThumbnails from "@/components/scanner/PageThumbnails";
 import MultiPageView from "@/components/scanner/MultiPageView";
 import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
+import ImageEditView from "@/components/scanner/ImageEditView";
 import { DocumentPage } from "@/types/scan";
 
 
@@ -32,6 +33,8 @@ export default function ScannerScreen() {
   const [pages, setPages] = useState<DocumentPage[]>([]);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [isMultiPageMode, setIsMultiPageMode] = useState(false);
+  const [showImageEditor, setShowImageEditor] = useState(false);
+  const [imageToEdit, setImageToEdit] = useState<string | null>(null);
   const { addDocument } = useDocuments();
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -67,21 +70,9 @@ export default function ScannerScreen() {
           });
 
       if (!result.canceled && result.assets[0]) {
-        if (pages.length === 0) {
-          // First image - single page mode
-          setSelectedImage(result.assets[0].uri);
-          setExtractedText("");
-          setCurrentDocumentId(null);
-          setIsDocumentSaved(false);
-          
-          // Automatically start text extraction after image selection
-          setTimeout(() => {
-            extractTextFromImage(result.assets[0].uri);
-          }, 100);
-        } else {
-          // Adding to existing multi-page document
-          addPageToDocument(result.assets[0].uri);
-        }
+        // Show image editor first
+        setImageToEdit(result.assets[0].uri);
+        setShowImageEditor(true);
       }
     } catch (error) {
       console.error("Error picking image:", error);
@@ -403,6 +394,54 @@ export default function ScannerScreen() {
     }
   };
 
+  const handleImageEdited = (editedImageUri: string) => {
+    setShowImageEditor(false);
+    setImageToEdit(null);
+    
+    if (pages.length === 0) {
+      // First image - single page mode
+      setSelectedImage(editedImageUri);
+      setExtractedText("");
+      setCurrentDocumentId(null);
+      setIsDocumentSaved(false);
+      
+      // Automatically start text extraction after image editing
+      setTimeout(() => {
+        extractTextFromImage(editedImageUri);
+      }, 100);
+    } else {
+      // Adding to existing multi-page document
+      addPageToDocument(editedImageUri);
+    }
+  };
+
+  const handleImageEditCanceled = () => {
+    setShowImageEditor(false);
+    setImageToEdit(null);
+  };
+
+  const editCurrentImage = () => {
+    if (selectedImage) {
+      setImageToEdit(selectedImage);
+      setShowImageEditor(true);
+    }
+  };
+
+  const handleExistingImageEdited = (editedImageUri: string) => {
+    setShowImageEditor(false);
+    setImageToEdit(null);
+    setSelectedImage(editedImageUri);
+    
+    // Re-extract text from the edited image
+    setExtractedText("");
+    setCurrentDocumentId(null);
+    setIsDocumentSaved(false);
+    
+    setTimeout(() => {
+      extractTextFromImage(editedImageUri);
+    }, 100);
+  };
+
   const clearScan = () => {
     setSelectedImage(null);
     setExtractedText("");
@@ -412,6 +451,8 @@ export default function ScannerScreen() {
     setPages([]);
     setSelectedPageId(null);
     setIsMultiPageMode(false);
+    setShowImageEditor(false);
+    setImageToEdit(null);
     
     // Reset animations
     sparkleAnim.setValue(0);
@@ -438,6 +479,18 @@ export default function ScannerScreen() {
   const closeFormatter = () => {
     setShowFormatter(false);
   };
+
+  // Show image editor
+  if (showImageEditor && imageToEdit) {
+    const isEditingExisting = selectedImage === imageToEdit;
+    return (
+      <ImageEditView
+        imageUri={imageToEdit}
+        onSave={isEditingExisting ? handleExistingImageEdited : handleImageEdited}
+        onCancel={handleImageEditCanceled}
+      />
+    );
+  }
 
   if (showFormatter && extractedText) {
     return (
@@ -511,6 +564,7 @@ export default function ScannerScreen() {
               isLoading={isLoading}
               onClearScan={clearScan}
               onExtractText={extractText}
+              onEditImage={editCurrentImage}
               pulseAnim={pulseAnim}
             />
 

@@ -8,13 +8,14 @@ import {
   ActivityIndicator,
   Animated,
 } from 'react-native';
-import { Trash2, Zap } from 'lucide-react-native';
+import { Trash2, Zap, Edit3 } from 'lucide-react-native';
 
 interface ImageScanViewProps {
   selectedImage: string;
   isLoading: boolean;
   onClearScan: () => void;
   onExtractText: () => void;
+  onEditImage?: () => void;
   pulseAnim: Animated.Value;
 }
 
@@ -23,6 +24,7 @@ export default function ImageScanView({
   isLoading,
   onClearScan,
   onExtractText,
+  onEditImage,
   pulseAnim,
 }: ImageScanViewProps) {
   return (
@@ -30,9 +32,16 @@ export default function ImageScanView({
       <View style={styles.imageContainer}>
         <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
         <View style={styles.imageOverlay}>
-          <TouchableOpacity style={styles.clearButton} onPress={onClearScan}>
-            <Trash2 size={18} color="#FF3B30" />
-          </TouchableOpacity>
+          <View style={styles.imageActions}>
+            {onEditImage && (
+              <TouchableOpacity style={styles.editButton} onPress={onEditImage}>
+                <Edit3 size={18} color="#0066CC" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.clearButton} onPress={onClearScan}>
+              <Trash2 size={18} color="#FF3B30" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -87,10 +96,27 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: "rgba(0, 0, 0, 0.05)",
   },
-  clearButton: {
+  imageActions: {
     position: "absolute",
     top: 16,
     right: 16,
+    flexDirection: "row",
+    gap: 8,
+  },
+  editButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  clearButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
