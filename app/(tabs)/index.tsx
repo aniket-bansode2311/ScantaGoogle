@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
+import Constants from "expo-constants";
 import { useDocuments } from "@/contexts/DocumentContext";
 import TextFormatter from "@/components/TextFormatter";
 import ScannerHeader from "@/components/scanner/ScannerHeader";
@@ -184,7 +185,7 @@ export default function ScannerScreen() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
       
-      const aiResponse = await fetch("https://toolkit.rork.com/text/llm/", {
+      const aiResponse = await fetch(Constants.expoConfig?.extra?.rorkAiApiUrl || "https://toolkit.rork.com/text/llm/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -303,7 +304,7 @@ export default function ScannerScreen() {
             reader.readAsDataURL(blob);
           });
           
-          const aiResponse = await fetch("https://toolkit.rork.com/text/llm/", {
+          const aiResponse = await fetch(Constants.expoConfig?.extra?.rorkAiApiUrl || "https://toolkit.rork.com/text/llm/", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
