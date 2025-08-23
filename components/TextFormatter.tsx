@@ -93,6 +93,7 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
   const [signatureStrokeWidth, setSignatureStrokeWidth] = useState(3);
   const viewShotRef = useRef<ViewShot>(null);
   const textInputRef = useRef<TextInput>(null);
+  const signatureCanvasRef = useRef<View>(null);
   const [selectionStart, setSelectionStart] = useState(0);
   const [selectionEnd, setSelectionEnd] = useState(0);
 
@@ -182,10 +183,8 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
       let signaturesHtml = '';
       if (signatures.length > 0) {
         signaturesHtml = '<div style="margin-top: 40px; text-align: right;">';
-        signatures.forEach((signature, index) => {
-          const svgPath = signature.points.map((point, i) => 
-            i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
-          ).join(' ');
+                 signatures.forEach((signature, index) => {
+           const svgPath = generateSvgPath(signature.points);
           
           signaturesHtml += `
             <svg width="120" height="60" style="margin-bottom: 20px;">
@@ -363,6 +362,34 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
     setSignatures(prev => prev.filter((_, i) => i !== index));
   };
 
+  const generateSvgPath = (points: SignaturePoint[]): string => {
+    if (points.length === 0) return '';
+    if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+    
+    let path = `M ${points[0].x} ${points[0].y}`;
+    
+    for (let i = 1; i < points.length; i++) {
+      path += ` L ${points[i].x} ${points[i].y}`;
+    }
+    
+    return path;
+  };
+
+  const onSignatureGestureEvent = (event: any) => {
+    const { x, y, state } = event.nativeEvent;
+    
+    if (state === State.ACTIVE) {
+      console.log('Drawing at:', x, y);
+      setCurrentSignature(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          points: [...prev.points, { x, y }]
+        };
+      });
+    }
+  };
+
   const onSignatureGestureStateChange = (event: any) => {
     const { state, x, y } = event.nativeEvent;
     
@@ -375,15 +402,9 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
           points: [{ x, y }]
         };
       });
-    } else if (state === State.ACTIVE) {
-      // Continue drawing
-      setCurrentSignature(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          points: [...prev.points, { x, y }]
-        };
-      });
+    } else if (state === State.END || state === State.CANCELLED) {
+      // End the stroke
+      console.log('Signature stroke ended with', currentSignature?.points.length, 'points');
     }
   };
 
@@ -575,18 +596,18 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
                 <Text style={styles.signaturesTitle}>Added Signatures ({signatures.length})</Text>
                 {signatures.map((signature, index) => (
                   <View key={index} style={styles.signatureItem}>
-                    <View style={styles.signaturePreview}>
-                      <Svg width={60} height={30} style={styles.signatureSvg}>
-                        <Path
-                          d={signature.points.map((point, i) => 
-                            i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
-                          ).join(' ')}
-                          stroke={signature.color}
-                          strokeWidth={signature.strokeWidth}
-                          fill="none"
-                        />
-                      </Svg>
-                    </View>
+                                         <View style={styles.signaturePreview}>
+                       <Svg width={60} height={30} style={styles.signatureSvg}>
+                         <Path
+                           d={generateSvgPath(signature.points)}
+                           stroke={signature.color}
+                           strokeWidth={signature.strokeWidth}
+                           fill="none"
+                           strokeLinecap="round"
+                           strokeLinejoin="round"
+                         />
+                       </Svg>
+                     </View>
                     <TouchableOpacity
                       style={styles.removeSignatureButton}
                       onPress={() => removeSignature(index)}
@@ -661,18 +682,18 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
               {/* Signatures */}
               {signatures.length > 0 && (
                 <View style={styles.signaturesContainer}>
-                  {signatures.map((signature, index) => (
-                    <Svg key={index} width={120} height={60} style={styles.signatureInPreview}>
-                      <Path
-                        d={signature.points.map((point, i) => 
-                          i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
-                        ).join(' ')}
-                        stroke={signature.color}
-                        strokeWidth={signature.strokeWidth}
-                        fill="none"
-                      />
-                    </Svg>
-                  ))}
+                                   {signatures.map((signature, index) => (
+                   <Svg key={index} width={120} height={60} style={styles.signatureInPreview}>
+                     <Path
+                       d={generateSvgPath(signature.points)}
+                       stroke={signature.color}
+                       strokeWidth={signature.strokeWidth}
+                       fill="none"
+                       strokeLinecap="round"
+                       strokeLinejoin="round"
+                     />
+                   </Svg>
+                 ))}
                 </View>
               )}
             </View>
@@ -739,18 +760,25 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
               </View>
               
               <PanGestureHandler 
+                onGestureEvent={onSignatureGestureEvent}
                 onHandlerStateChange={onSignatureGestureStateChange}
               >
-                <View style={styles.signatureCanvas}>
+                <View ref={signatureCanvasRef} style={styles.signatureCanvas}>
+                  <Text style={styles.signatureCanvasHint}>
+                    {currentSignature && currentSignature.points.length > 0 
+                      ? `Drawing... (${currentSignature.points.length} points)`
+                      : 'Touch and drag to draw your signature'
+                    }
+                  </Text>
                   {currentSignature && currentSignature.points.length > 0 && (
                     <Svg width="100%" height="100%" style={styles.signatureSvgCanvas}>
                       <Path
-                        d={currentSignature.points.map((point, i) => 
-                          i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
-                        ).join(' ')}
+                        d={generateSvgPath(currentSignature.points)}
                         stroke={currentSignature.color}
                         strokeWidth={currentSignature.strokeWidth}
                         fill="none"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
                     </Svg>
                   )}
@@ -1088,6 +1116,16 @@ const styles = StyleSheet.create({
     borderColor: '#E5E5EA',
     borderRadius: 12,
     marginBottom: 20,
+    minHeight: 200,
+    position: 'relative',
+  },
+  signatureCanvasHint: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    fontSize: 12,
+    color: '#8E8E93',
+    zIndex: 1,
   },
   signatureSvgCanvas: {
     position: 'absolute',
