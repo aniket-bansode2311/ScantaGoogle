@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, lazy, Suspense } from "react";
 import {
   View,
   StyleSheet,
   ScrollView,
   Alert,
   Animated,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -13,21 +14,30 @@ import Constants from "expo-constants";
 import { useDocuments } from "@/contexts/DocumentContext";
 import { useOCRSettings } from "@/contexts/OCRSettingsContext";
 import { useOCRWorker } from "@/lib/ocrWorker";
-import TextFormatter from "@/components/TextFormatter";
 import ScannerHeader from "@/components/scanner/ScannerHeader";
 import EmptyState from "@/components/scanner/EmptyState";
-import ImageScanView from "@/components/scanner/ImageScanView";
-import ResultsView from "@/components/scanner/ResultsView";
-import PageThumbnails from "@/components/scanner/PageThumbnails";
-import MultiPageView from "@/components/scanner/MultiPageView";
-import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
-import ImageEditView from "@/components/scanner/ImageEditView";
-import SignatureManager from "@/components/signature/SignatureManager";
-import OptimizationOverlay from "@/components/scanner/OptimizationOverlay";
-import OCRProgressIndicator from "@/components/scanner/OCRProgressIndicator";
 import { DocumentPage, SignatureInstance } from "@/types/scan";
 import { OCRLanguage } from "@/contexts/OCRSettingsContext";
 import { optimizeDocumentImage, OptimizedImageResult } from "@/lib/imageOptimizer";
+
+// Lazy load heavy components to improve initial render time
+const TextFormatter = lazy(() => import("@/components/TextFormatter"));
+const ImageScanView = lazy(() => import("@/components/scanner/ImageScanView"));
+const ResultsView = lazy(() => import("@/components/scanner/ResultsView"));
+const PageThumbnails = lazy(() => import("@/components/scanner/PageThumbnails"));
+const MultiPageView = lazy(() => import("@/components/scanner/MultiPageView"));
+const MultiPageResultsView = lazy(() => import("@/components/scanner/MultiPageResultsView"));
+const ImageEditView = lazy(() => import("@/components/scanner/ImageEditView"));
+const SignatureManager = lazy(() => import("@/components/signature/SignatureManager"));
+const OptimizationOverlay = lazy(() => import("@/components/scanner/OptimizationOverlay"));
+const OCRProgressIndicator = lazy(() => import("@/components/scanner/OCRProgressIndicator"));
+
+// Loading component for lazy-loaded components
+const ComponentLoader = () => (
+  <View style={styles.loaderContainer}>
+    <ActivityIndicator size="small" color="#3b82f6" />
+  </View>
+);
 
 
 
@@ -57,8 +67,10 @@ export default function ScannerScreen() {
   const sparkleAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
 
-  // Handle OCR results
+  // Handle OCR results - optimized with requestAnimationFrame for better performance
   useEffect(() => {
+    let animationFrame: number;
+    
     const checkForResults = () => {
       const tasksToCheck = Array.from(activeOCRTasks);
       
@@ -73,12 +85,24 @@ export default function ScannerScreen() {
           });
         }
       });
+      
+      // Continue checking if there are still active tasks
+      if (activeOCRTasks.size > 0) {
+        animationFrame = requestAnimationFrame(() => {
+          setTimeout(checkForResults, 500);
+        });
+      }
     };
 
     if (activeOCRTasks.size > 0) {
-      const interval = setInterval(checkForResults, 500);
-      return () => clearInterval(interval);
+      checkForResults();
     }
+    
+    return () => {
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
   }, [activeOCRTasks, getResult]);
 
   const getLanguagePrompt = (languageCode: OCRLanguage): string => {
@@ -621,14 +645,16 @@ export default function ScannerScreen() {
   // Show signature manager
   if (showSignatureManager) {
     return (
-      <SignatureManager
-        mode={signatureMode}
-        imageUri={selectedImage || undefined}
-        existingSignatures={documentSignatures}
-        onSave={handleSignatureSave}
-        onSaveSignatures={handleSignaturesSave}
-        onCancel={handleSignatureCancel}
-      />
+      <Suspense fallback={<ComponentLoader />}>
+        <SignatureManager
+          mode={signatureMode}
+          imageUri={selectedImage || undefined}
+          existingSignatures={documentSignatures}
+          onSave={handleSignatureSave}
+          onSaveSignatures={handleSignaturesSave}
+          onCancel={handleSignatureCancel}
+        />
+      </Suspense>
     );
   }
 
@@ -636,21 +662,25 @@ export default function ScannerScreen() {
   if (showImageEditor && imageToEdit) {
     const isEditingExisting = selectedImage === imageToEdit;
     return (
-      <ImageEditView
-        imageUri={imageToEdit}
-        onSave={isEditingExisting ? handleExistingImageEdited : handleImageEdited}
-        onCancel={handleImageEditCanceled}
-      />
+      <Suspense fallback={<ComponentLoader />}>
+        <ImageEditView
+          imageUri={imageToEdit}
+          onSave={isEditingExisting ? handleExistingImageEdited : handleImageEdited}
+          onCancel={handleImageEditCanceled}
+        />
+      </Suspense>
     );
   }
 
   if (showFormatter && extractedText) {
     return (
-      <TextFormatter
-        initialText={extractedText}
-        onBack={closeFormatter}
-        documentId={currentDocumentId || undefined}
-      />
+      <Suspense fallback={<ComponentLoader />}>
+        <TextFormatter
+          initialText={extractedText}
+          onBack={closeFormatter}
+          documentId={currentDocumentId || undefined}
+        />
+      </Suspense>
     );
   }
 
@@ -664,47 +694,51 @@ export default function ScannerScreen() {
         <ScannerHeader />
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          <PageThumbnails
-            pages={pages}
-            onAddPage={pickImage}
-            onDeletePage={deletePageFromDocument}
-            onReorderPages={reorderPages}
-            selectedPageId={selectedPageId || undefined}
-            onSelectPage={selectPage}
-          />
-          
-          <MultiPageView
-            pages={pages}
-            selectedPageId={selectedPageId || undefined}
-            isProcessing={isProcessing || activeOCRTasks.size > 0}
-            onExtractAllText={extractAllPagesText}
-            onBack={() => setIsMultiPageMode(false)}
-            pulseAnim={pulseAnim}
-          />
-          
-          {allPagesProcessed && hasExtractedText && (
-            <MultiPageResultsView
+          <Suspense fallback={<ComponentLoader />}>
+            <PageThumbnails
               pages={pages}
-              onOpenFormatter={openFormatter}
-              onCopyToClipboard={copyToClipboard}
-              onClearScan={clearScan}
-              sparkleAnim={sparkleAnim}
-              slideAnim={slideAnim}
+              onAddPage={pickImage}
+              onDeletePage={deletePageFromDocument}
+              onReorderPages={reorderPages}
+              selectedPageId={selectedPageId || undefined}
+              onSelectPage={selectPage}
             />
-          )}
+            
+            <MultiPageView
+              pages={pages}
+              selectedPageId={selectedPageId || undefined}
+              isProcessing={isProcessing || activeOCRTasks.size > 0}
+              onExtractAllText={extractAllPagesText}
+              onBack={() => setIsMultiPageMode(false)}
+              pulseAnim={pulseAnim}
+            />
+            
+            {allPagesProcessed && hasExtractedText && (
+              <MultiPageResultsView
+                pages={pages}
+                onOpenFormatter={openFormatter}
+                onCopyToClipboard={copyToClipboard}
+                onClearScan={clearScan}
+                sparkleAnim={sparkleAnim}
+                slideAnim={slideAnim}
+              />
+            )}
+          </Suspense>
         </ScrollView>
         
-        <OptimizationOverlay
-          visible={isOptimizingImage}
-          progress={optimizationProgress}
-        />
-        
-        <OCRProgressIndicator
-          visible={isProcessing || activeOCRTasks.size > 0}
-          progress={ocrProgress || 'Processing text extraction...'}
-          queueLength={queueStatus.queueLength}
-          activeTasks={queueStatus.activeTasks}
-        />
+        <Suspense fallback={null}>
+          <OptimizationOverlay
+            visible={isOptimizingImage}
+            progress={optimizationProgress}
+          />
+          
+          <OCRProgressIndicator
+            visible={isProcessing || activeOCRTasks.size > 0}
+            progress={ocrProgress || 'Processing text extraction...'}
+            queueLength={queueStatus.queueLength}
+            activeTasks={queueStatus.activeTasks}
+          />
+        </Suspense>
       </SafeAreaView>
     );
   }
@@ -723,43 +757,47 @@ export default function ScannerScreen() {
           />
         ) : (
           <View style={styles.scanContainer}>
-            <ImageScanView
-              selectedImage={selectedImage}
-              isLoading={isProcessing || activeOCRTasks.size > 0}
-              onClearScan={clearScan}
-              onExtractText={extractText}
-              onEditImage={editCurrentImage}
-              pulseAnim={pulseAnim}
-            />
-
-            {extractedText ? (
-              <ResultsView
-                extractedText={extractedText}
-                currentDocumentId={currentDocumentId}
-                onOpenFormatter={openFormatter}
-                onCopyToClipboard={copyToClipboard}
+            <Suspense fallback={<ComponentLoader />}>
+              <ImageScanView
+                selectedImage={selectedImage}
+                isLoading={isProcessing || activeOCRTasks.size > 0}
                 onClearScan={clearScan}
-                onConvertToMultiPage={convertToMultiPage}
-                onAddSignature={handleAddSignature}
-                sparkleAnim={sparkleAnim}
-                slideAnim={slideAnim}
+                onExtractText={extractText}
+                onEditImage={editCurrentImage}
+                pulseAnim={pulseAnim}
               />
-            ) : null}
+
+              {extractedText ? (
+                <ResultsView
+                  extractedText={extractedText}
+                  currentDocumentId={currentDocumentId}
+                  onOpenFormatter={openFormatter}
+                  onCopyToClipboard={copyToClipboard}
+                  onClearScan={clearScan}
+                  onConvertToMultiPage={convertToMultiPage}
+                  onAddSignature={handleAddSignature}
+                  sparkleAnim={sparkleAnim}
+                  slideAnim={slideAnim}
+                />
+              ) : null}
+            </Suspense>
           </View>
         )}
       </ScrollView>
       
-      <OptimizationOverlay
-        visible={isOptimizingImage}
-        progress={optimizationProgress}
-      />
-      
-      <OCRProgressIndicator
-        visible={isProcessing || activeOCRTasks.size > 0}
-        progress={ocrProgress || 'Processing text extraction...'}
-        queueLength={queueStatus.queueLength}
-        activeTasks={queueStatus.activeTasks}
-      />
+      <Suspense fallback={null}>
+        <OptimizationOverlay
+          visible={isOptimizingImage}
+          progress={optimizationProgress}
+        />
+        
+        <OCRProgressIndicator
+          visible={isProcessing || activeOCRTasks.size > 0}
+          progress={ocrProgress || 'Processing text extraction...'}
+          queueLength={queueStatus.queueLength}
+          activeTasks={queueStatus.activeTasks}
+        />
+      </Suspense>
     </SafeAreaView>
   );
 }
@@ -775,5 +813,11 @@ const styles = StyleSheet.create({
   },
   scanContainer: {
     gap: 20,
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
 });

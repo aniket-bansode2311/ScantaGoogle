@@ -2,6 +2,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { auth, type User } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
+import { startMetric, endMetric } from '@/lib/performance';
 
 interface AuthContextType {
   user: User | null;
@@ -18,16 +19,44 @@ export const [AuthProvider, useAuth] = createContextHook((): AuthContextType => 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    auth.getCurrentUser().then(({ data: { user }, error }) => {
-      if (user && !error) {
-        setUser(user as User);
+    let mounted = true;
+    
+    // Defer initial auth check to improve cold start
+    const initAuth = async () => {
+      startMetric('Auth Initialization');
+      try {
+        // Use faster session check first
+        const { data: { session }, error } = await auth.getSession();
+        
+        if (!mounted) return;
+        
+        if (session?.user && !error) {
+          setUser(session.user as User);
+          setSession(session);
+        } else {
+          // Fallback to getCurrentUser if no session
+          const { data: { user }, error: userError } = await auth.getCurrentUser();
+          if (user && !userError && mounted) {
+            setUser(user as User);
+          }
+        }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+          endMetric('Auth Initialization');
+        }
       }
-      setLoading(false);
-    });
+    };
+    
+    // Start auth initialization immediately but don't block
+    initAuth();
 
     // Listen for auth changes
     const { data: { subscription } } = auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      
       console.log('Auth state changed:', event, session?.user?.id);
       
       if (session?.user) {
@@ -41,6 +70,7 @@ export const [AuthProvider, useAuth] = createContextHook((): AuthContextType => 
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);

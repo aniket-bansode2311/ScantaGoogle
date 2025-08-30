@@ -29,7 +29,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
 
-  const loadDocuments = useCallback(async (reset: boolean = true) => {
+  const loadDocuments = useCallback(async (reset: boolean = true, immediate: boolean = false) => {
     if (!user) {
       setDocs([]);
       setTotalCount(0);
@@ -40,6 +40,13 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     if (reset) {
       setLoading(true);
       setDocs([]);
+    }
+
+    // Defer initial load for better cold start performance
+    if (!immediate && reset) {
+      setTimeout(() => loadDocuments(reset, true), 500);
+      setLoading(false);
+      return;
     }
 
     try {
@@ -110,7 +117,10 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    loadDocuments();
+    // Only load documents when user is available and defer for cold start optimization
+    if (user) {
+      loadDocuments();
+    }
   }, [user, loadDocuments]);
 
   const addDocument = async (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {

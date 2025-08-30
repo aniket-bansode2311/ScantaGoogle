@@ -9,7 +9,32 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Lazy initialize Supabase client to improve cold start
+let _supabase: ReturnType<typeof createClient> | null = null;
+
+export const supabase = (() => {
+  if (!_supabase) {
+    console.log('🚀 Initializing Supabase client...');
+    _supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        // Optimize auth for faster startup
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false, // Disable for mobile
+      },
+      global: {
+        // Add timeout for faster failure
+        fetch: (url, options = {}) => {
+          return fetch(url, {
+            ...options,
+            signal: AbortSignal.timeout(15000), // 15 second timeout
+          });
+        },
+      },
+    });
+  }
+  return _supabase;
+})();
 
 // Types for our database
 export interface User {

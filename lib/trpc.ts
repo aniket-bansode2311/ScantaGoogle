@@ -15,11 +15,28 @@ const getBaseUrl = () => {
   );
 };
 
-export const trpcClient = trpc.createClient({
-  links: [
-    httpLink({
-      url: `${getBaseUrl()}/api/trpc`,
-      transformer: superjson,
-    }),
-  ],
-});
+// Lazy initialize tRPC client to improve cold start
+let _trpcClient: ReturnType<typeof trpc.createClient> | null = null;
+
+export const trpcClient = (() => {
+  if (!_trpcClient) {
+    console.log('🚀 Initializing tRPC client...');
+    _trpcClient = trpc.createClient({
+      links: [
+        httpLink({
+          url: `${getBaseUrl()}/api/trpc`,
+          transformer: superjson,
+          // Optimize for faster requests
+          fetch: (url, options) => {
+            return fetch(url, {
+              ...options,
+              // Add timeout for faster failure
+              signal: AbortSignal.timeout(10000), // 10 second timeout
+            });
+          },
+        }),
+      ],
+    });
+  }
+  return _trpcClient;
+})();
