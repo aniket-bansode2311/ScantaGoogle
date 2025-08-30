@@ -22,8 +22,10 @@ import MultiPageView from "@/components/scanner/MultiPageView";
 import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
 import ImageEditView from "@/components/scanner/ImageEditView";
 import SignatureManager from "@/components/signature/SignatureManager";
+import OptimizationOverlay from "@/components/scanner/OptimizationOverlay";
 import { DocumentPage, SignatureInstance } from "@/types/scan";
 import { OCRLanguage } from "@/contexts/OCRSettingsContext";
+import { optimizeDocumentImage, OptimizedImageResult } from "@/lib/imageOptimizer";
 
 
 
@@ -42,6 +44,8 @@ export default function ScannerScreen() {
   const [showSignatureManager, setShowSignatureManager] = useState(false);
   const [signatureMode, setSignatureMode] = useState<'create' | 'library' | 'overlay'>('library');
   const [documentSignatures, setDocumentSignatures] = useState<SignatureInstance[]>([]);
+  const [isOptimizingImage, setIsOptimizingImage] = useState(false);
+  const [optimizationProgress, setOptimizationProgress] = useState<string>('');
   const { addDocument } = useDocuments();
   const { selectedLanguage } = useOCRSettings();
   
@@ -91,9 +95,30 @@ export default function ScannerScreen() {
           });
 
       if (!result.canceled && result.assets[0]) {
-        // Show image editor first
-        setImageToEdit(result.assets[0].uri);
-        setShowImageEditor(true);
+        const imageUri = result.assets[0].uri;
+        
+        // Optimize image before editing
+        setIsOptimizingImage(true);
+        setOptimizationProgress('Optimizing image for better OCR...');
+        
+        try {
+          console.log('🚀 Starting image optimization pipeline...');
+          const optimizedResult = await optimizeDocumentImage(imageUri);
+          
+          console.log(`📈 Optimization complete: ${optimizedResult.originalSizeKB}KB → ${optimizedResult.optimizedSizeKB}KB (${(optimizedResult.compressionRatio * 100).toFixed(1)}% of original)`);
+          
+          // Show image editor with optimized image
+          setImageToEdit(optimizedResult.uri);
+          setShowImageEditor(true);
+        } catch (error) {
+          console.error('⚠️ Image optimization failed, using original:', error);
+          // Fallback to original image if optimization fails
+          setImageToEdit(imageUri);
+          setShowImageEditor(true);
+        } finally {
+          setIsOptimizingImage(false);
+          setOptimizationProgress('');
+        }
       }
     } catch (error) {
       console.error("Error picking image:", error);
@@ -305,9 +330,20 @@ export default function ScannerScreen() {
       for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
         if (!page.extractedText) {
-          console.log(`Processing page ${i + 1} of ${pages.length}`);
+          console.log(`🔄 Processing page ${i + 1} of ${pages.length}`);
           
-          const response = await fetch(page.imageUri);
+          // Optimize each page image before OCR if not already optimized
+          let imageUri = page.imageUri;
+          try {
+            console.log(`🖼️ Optimizing page ${i + 1} for OCR...`);
+            const optimizedResult = await optimizeDocumentImage(page.imageUri);
+            imageUri = optimizedResult.uri;
+            console.log(`✅ Page ${i + 1} optimized: ${optimizedResult.originalSizeKB}KB → ${optimizedResult.optimizedSizeKB}KB`);
+          } catch (optimizationError) {
+            console.warn(`⚠️ Failed to optimize page ${i + 1}, using original:`, optimizationError);
+          }
+          
+          const response = await fetch(imageUri);
           const blob = await response.blob();
           
           const base64Data = await new Promise<string>((resolve, reject) => {
@@ -319,6 +355,8 @@ export default function ScannerScreen() {
             reader.onerror = reject;
             reader.readAsDataURL(blob);
           });
+          
+          console.log(`🤖 Sending page ${i + 1} to AI for text extraction...`);
           
           const aiResponse = await fetch(Constants.expoConfig?.extra?.rorkAiApiUrl || "https://toolkit.rork.com/text/llm/", {
             method: "POST",
@@ -351,10 +389,12 @@ export default function ScannerScreen() {
           const data = await aiResponse.json();
           const text = data.completion || "No text detected";
           
-          // Update the page with extracted text
+          console.log(`📝 Page ${i + 1} text extraction complete: ${text.length} characters`);
+          
+          // Update the page with extracted text and optimized image URI
           setPages(prevPages => 
             prevPages.map(p => 
-              p.id === page.id ? { ...p, extractedText: text } : p
+              p.id === page.id ? { ...p, extractedText: text, imageUri } : p
             )
           );
         }
@@ -415,24 +455,55 @@ export default function ScannerScreen() {
     }
   };
 
-  const handleImageEdited = (editedImageUri: string) => {
+  const handleImageEdited = async (editedImageUri: string) => {
     setShowImageEditor(false);
     setImageToEdit(null);
     
-    if (pages.length === 0) {
-      // First image - single page mode
-      setSelectedImage(editedImageUri);
-      setExtractedText("");
-      setCurrentDocumentId(null);
-      setIsDocumentSaved(false);
+    // Apply final optimization after editing
+    setIsOptimizingImage(true);
+    setOptimizationProgress('Applying final optimization...');
+    
+    try {
+      console.log('🔧 Applying final optimization after editing...');
+      const finalOptimizedResult = await optimizeDocumentImage(editedImageUri);
       
-      // Automatically start text extraction after image editing
-      setTimeout(() => {
-        extractTextFromImage(editedImageUri);
-      }, 100);
-    } else {
-      // Adding to existing multi-page document
-      addPageToDocument(editedImageUri);
+      console.log(`🎯 Final optimization: ${finalOptimizedResult.originalSizeKB}KB → ${finalOptimizedResult.optimizedSizeKB}KB`);
+      
+      const finalImageUri = finalOptimizedResult.uri;
+      
+      if (pages.length === 0) {
+        // First image - single page mode
+        setSelectedImage(finalImageUri);
+        setExtractedText("");
+        setCurrentDocumentId(null);
+        setIsDocumentSaved(false);
+        
+        // Automatically start text extraction after image editing
+        setTimeout(() => {
+          extractTextFromImage(finalImageUri);
+        }, 100);
+      } else {
+        // Adding to existing multi-page document
+        addPageToDocument(finalImageUri);
+      }
+    } catch (error) {
+      console.error('⚠️ Final optimization failed, using edited image:', error);
+      // Fallback to edited image if final optimization fails
+      if (pages.length === 0) {
+        setSelectedImage(editedImageUri);
+        setExtractedText("");
+        setCurrentDocumentId(null);
+        setIsDocumentSaved(false);
+        
+        setTimeout(() => {
+          extractTextFromImage(editedImageUri);
+        }, 100);
+      } else {
+        addPageToDocument(editedImageUri);
+      }
+    } finally {
+      setIsOptimizingImage(false);
+      setOptimizationProgress('');
     }
   };
 
@@ -448,19 +519,46 @@ export default function ScannerScreen() {
     }
   };
 
-  const handleExistingImageEdited = (editedImageUri: string) => {
+  const handleExistingImageEdited = async (editedImageUri: string) => {
     setShowImageEditor(false);
     setImageToEdit(null);
-    setSelectedImage(editedImageUri);
     
-    // Re-extract text from the edited image
-    setExtractedText("");
-    setCurrentDocumentId(null);
-    setIsDocumentSaved(false);
+    // Apply final optimization after editing existing image
+    setIsOptimizingImage(true);
+    setOptimizationProgress('Optimizing edited image...');
     
-    setTimeout(() => {
-      extractTextFromImage(editedImageUri);
-    }, 100);
+    try {
+      console.log('🔄 Optimizing existing edited image...');
+      const optimizedResult = await optimizeDocumentImage(editedImageUri);
+      
+      console.log(`✨ Existing image optimized: ${optimizedResult.originalSizeKB}KB → ${optimizedResult.optimizedSizeKB}KB`);
+      
+      setSelectedImage(optimizedResult.uri);
+      
+      // Re-extract text from the optimized edited image
+      setExtractedText("");
+      setCurrentDocumentId(null);
+      setIsDocumentSaved(false);
+      
+      setTimeout(() => {
+        extractTextFromImage(optimizedResult.uri);
+      }, 100);
+    } catch (error) {
+      console.error('⚠️ Optimization of edited image failed:', error);
+      // Fallback to edited image
+      setSelectedImage(editedImageUri);
+      
+      setExtractedText("");
+      setCurrentDocumentId(null);
+      setIsDocumentSaved(false);
+      
+      setTimeout(() => {
+        extractTextFromImage(editedImageUri);
+      }, 100);
+    } finally {
+      setIsOptimizingImage(false);
+      setOptimizationProgress('');
+    }
   };
 
   const clearScan = () => {
@@ -599,6 +697,11 @@ export default function ScannerScreen() {
             />
           )}
         </ScrollView>
+        
+        <OptimizationOverlay
+          visible={isOptimizingImage}
+          progress={optimizationProgress}
+        />
       </SafeAreaView>
     );
   }
@@ -642,6 +745,11 @@ export default function ScannerScreen() {
           </View>
         )}
       </ScrollView>
+      
+      <OptimizationOverlay
+        visible={isOptimizingImage}
+        progress={optimizationProgress}
+      />
     </SafeAreaView>
   );
 }
