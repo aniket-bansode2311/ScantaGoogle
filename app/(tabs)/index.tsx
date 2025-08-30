@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -12,6 +12,7 @@ import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import { useDocuments } from "@/contexts/DocumentContext";
 import { useOCRSettings } from "@/contexts/OCRSettingsContext";
+import { useOCRWorker } from "@/lib/ocrWorker";
 import TextFormatter from "@/components/TextFormatter";
 import ScannerHeader from "@/components/scanner/ScannerHeader";
 import EmptyState from "@/components/scanner/EmptyState";
@@ -23,6 +24,7 @@ import MultiPageResultsView from "@/components/scanner/MultiPageResultsView";
 import ImageEditView from "@/components/scanner/ImageEditView";
 import SignatureManager from "@/components/signature/SignatureManager";
 import OptimizationOverlay from "@/components/scanner/OptimizationOverlay";
+import OCRProgressIndicator from "@/components/scanner/OCRProgressIndicator";
 import { DocumentPage, SignatureInstance } from "@/types/scan";
 import { OCRLanguage } from "@/contexts/OCRSettingsContext";
 import { optimizeDocumentImage, OptimizedImageResult } from "@/lib/imageOptimizer";
@@ -32,7 +34,6 @@ import { optimizeDocumentImage, OptimizedImageResult } from "@/lib/imageOptimize
 export default function ScannerScreen() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(false);
   const [showFormatter, setShowFormatter] = useState(false);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
   const [isDocumentSaved, setIsDocumentSaved] = useState(false);
@@ -46,12 +47,39 @@ export default function ScannerScreen() {
   const [documentSignatures, setDocumentSignatures] = useState<SignatureInstance[]>([]);
   const [isOptimizingImage, setIsOptimizingImage] = useState(false);
   const [optimizationProgress, setOptimizationProgress] = useState<string>('');
+  const [ocrProgress, setOcrProgress] = useState<string>('');
+  const [activeOCRTasks, setActiveOCRTasks] = useState<Set<string>>(new Set());
   const { addDocument } = useDocuments();
   const { selectedLanguage } = useOCRSettings();
+  const { submitTask, getResult, clearResults, isProcessing, queueStatus } = useOCRWorker();
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const sparkleAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+
+  // Handle OCR results
+  useEffect(() => {
+    const checkForResults = () => {
+      const tasksToCheck = Array.from(activeOCRTasks);
+      
+      tasksToCheck.forEach(taskId => {
+        const result = getResult(taskId);
+        if (result) {
+          handleOCRResult(taskId, result.text, result.error);
+          setActiveOCRTasks(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(taskId);
+            return newSet;
+          });
+        }
+      });
+    };
+
+    if (activeOCRTasks.size > 0) {
+      const interval = setInterval(checkForResults, 500);
+      return () => clearInterval(interval);
+    }
+  }, [activeOCRTasks, getResult]);
 
   const getLanguagePrompt = (languageCode: OCRLanguage): string => {
     const languageMap: Record<OCRLanguage, string> = {
@@ -179,89 +207,17 @@ export default function ScannerScreen() {
     }
   };
 
-  const extractTextFromImage = async (imageUri: string) => {
-    if (!imageUri) return;
-    if (isLoading) return; // Prevent multiple simultaneous requests
-    if (isDocumentSaved && extractedText) return; // Don't save again if already saved
+  const handleOCRResult = (taskId: string, text: string, error?: string) => {
+    if (error) {
+      console.error(`OCR failed for task ${taskId}:`, error);
+      Alert.alert("Error", "Failed to extract text. Please check your internet connection and try again.");
+      return;
+    }
 
-    setIsLoading(true);
+    console.log(`OCR completed for task ${taskId}:`, text.length, 'characters');
     
-    // Start loading animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.1,
-          duration: 600, // Faster animation
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 600, // Faster animation
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-    
-    try {
-      console.log('Starting text extraction...');
-      
-      // Optimize image processing
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      
-      // Use Promise-based approach for faster processing
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      
-      console.log('Image converted to base64, sending to AI...');
-      
-      // Add timeout and optimized prompt for faster processing
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
-      const aiResponse = await fetch(Constants.expoConfig?.extra?.rorkAiApiUrl || "https://toolkit.rork.com/text/llm/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Extract text from this image quickly. ${selectedLanguage !== 'auto' ? `The text is primarily in ${getLanguagePrompt(selectedLanguage)}.` : 'Auto-detect the language.'} Return only the text content, no formatting or commentary.`,
-                },
-                {
-                  type: "image",
-                  image: base64Data,
-                },
-              ],
-            },
-          ],
-        }),
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!aiResponse.ok) {
-        throw new Error(`AI API error: ${aiResponse.status}`);
-      }
-      
-      const data = await aiResponse.json();
-      const text = data.completion || "No text detected";
-      
-      console.log('Text extraction completed:', text.length, 'characters');
-      
+    // Check if this is for a single image or a page
+    if (taskId.startsWith('single-')) {
       setExtractedText(text);
       
       if (text !== "No text detected") {
@@ -269,26 +225,24 @@ export default function ScannerScreen() {
         Animated.sequence([
           Animated.timing(sparkleAnim, {
             toValue: 1,
-            duration: 400, // Faster animation
+            duration: 400,
             useNativeDriver: true,
           }),
           Animated.timing(slideAnim, {
             toValue: 1,
-            duration: 300, // Faster animation
+            duration: 300,
             useNativeDriver: true,
           }),
         ]).start();
         
-        // Generate a title from the first line or words of extracted text
+        // Generate a title and save document in background
         const title = generateDocumentTitle(text);
         
-        // Save to Supabase only if not already saved (run in background)
-        if (!isDocumentSaved) {
-          // Don't await this to make UI faster
+        if (!isDocumentSaved && selectedImage) {
           addDocument({
             title,
             content: text,
-            image_url: imageUri,
+            image_url: selectedImage,
           }).then(({ data: document, error }) => {
             if (error) {
               console.error("Error saving document:", error);
@@ -302,18 +256,76 @@ export default function ScannerScreen() {
           });
         }
       }
-    } catch (error: any) {
-      console.error("Error extracting text:", error);
-      if (error.name === 'AbortError') {
-        Alert.alert("Timeout", "Text extraction is taking too long. Please try with a smaller or clearer image.");
-      } else {
-        Alert.alert("Error", "Failed to extract text. Please check your internet connection and try again.");
-      }
-    } finally {
-      setIsLoading(false);
-      pulseAnim.stopAnimation();
-      pulseAnim.setValue(1);
+    } else if (taskId.startsWith('page-')) {
+      // Update specific page with extracted text
+      const pageId = taskId.replace('page-', '');
+      setPages(prevPages => {
+        const updatedPages = prevPages.map(p => 
+          p.id === pageId ? { ...p, extractedText: text } : p
+        );
+        
+        // Check if all pages are now processed
+        const allProcessed = updatedPages.every(page => page.extractedText);
+        if (allProcessed) {
+          // Stop pulse animation and start success animation
+          pulseAnim.stopAnimation();
+          pulseAnim.setValue(1);
+          
+          Animated.sequence([
+            Animated.timing(sparkleAnim, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+            Animated.timing(slideAnim, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ]).start();
+        }
+        
+        return updatedPages;
+      });
     }
+  };
+
+  const extractTextFromImage = async (imageUri: string) => {
+    if (!imageUri) return;
+    if (isDocumentSaved && extractedText) return;
+
+    const taskId = `single-${Date.now()}`;
+    
+    // Start loading animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+    
+    // Add task to active set
+    setActiveOCRTasks(prev => new Set(prev.add(taskId)));
+    
+    // Submit OCR task to background worker
+    submitTask({
+      id: taskId,
+      imageUri,
+      language: selectedLanguage,
+      onProgress: (progress) => {
+        setOcrProgress(progress);
+      },
+    });
+    
+    console.log(`🚀 Submitted OCR task ${taskId} for single image`);
   };
 
   const extractText = async () => {
@@ -324,13 +336,30 @@ export default function ScannerScreen() {
   const extractAllPagesText = async () => {
     if (pages.length === 0) return;
     
-    setIsLoading(true);
+    // Start loading animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
     
     try {
+      const tasksToSubmit: string[] = [];
+      
+      // Submit all pages for OCR processing in parallel
       for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
         if (!page.extractedText) {
-          console.log(`🔄 Processing page ${i + 1} of ${pages.length}`);
+          console.log(`🔄 Submitting page ${i + 1} of ${pages.length} for OCR`);
           
           // Optimize each page image before OCR if not already optimized
           let imageUri = page.imageUri;
@@ -339,86 +368,44 @@ export default function ScannerScreen() {
             const optimizedResult = await optimizeDocumentImage(page.imageUri);
             imageUri = optimizedResult.uri;
             console.log(`✅ Page ${i + 1} optimized: ${optimizedResult.originalSizeKB}KB → ${optimizedResult.optimizedSizeKB}KB`);
+            
+            // Update page with optimized image URI
+            setPages(prevPages => 
+              prevPages.map(p => 
+                p.id === page.id ? { ...p, imageUri } : p
+              )
+            );
           } catch (optimizationError) {
             console.warn(`⚠️ Failed to optimize page ${i + 1}, using original:`, optimizationError);
           }
           
-          const response = await fetch(imageUri);
-          const blob = await response.blob();
+          const taskId = `page-${page.id}`;
+          tasksToSubmit.push(taskId);
           
-          const base64Data = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result as string;
-              resolve(result.split(',')[1]);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          
-          console.log(`🤖 Sending page ${i + 1} to AI for text extraction...`);
-          
-          const aiResponse = await fetch(Constants.expoConfig?.extra?.rorkAiApiUrl || "https://toolkit.rork.com/text/llm/", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
+          // Submit OCR task to background worker
+          submitTask({
+            id: taskId,
+            imageUri,
+            language: selectedLanguage,
+            onProgress: (progress) => {
+              setOcrProgress(`Page ${i + 1}: ${progress}`);
             },
-            body: JSON.stringify({
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: `Extract text from this image quickly. ${selectedLanguage !== 'auto' ? `The text is primarily in ${getLanguagePrompt(selectedLanguage)}.` : 'Auto-detect the language.'} Return only the text content, no formatting or commentary.`,
-                    },
-                    {
-                      type: "image",
-                      image: base64Data,
-                    },
-                  ],
-                },
-              ],
-            }),
           });
-          
-          if (!aiResponse.ok) {
-            throw new Error(`AI API error: ${aiResponse.status}`);
-          }
-          
-          const data = await aiResponse.json();
-          const text = data.completion || "No text detected";
-          
-          console.log(`📝 Page ${i + 1} text extraction complete: ${text.length} characters`);
-          
-          // Update the page with extracted text and optimized image URI
-          setPages(prevPages => 
-            prevPages.map(p => 
-              p.id === page.id ? { ...p, extractedText: text, imageUri } : p
-            )
-          );
         }
       }
       
-      // Success animation
-      Animated.sequence([
-        Animated.timing(sparkleAnim, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
+      // Add all tasks to active set
+      setActiveOCRTasks(prev => {
+        const newSet = new Set(prev);
+        tasksToSubmit.forEach(taskId => newSet.add(taskId));
+        return newSet;
+      });
+      
+      console.log(`🚀 Submitted ${tasksToSubmit.length} OCR tasks for multi-page processing`);
       
     } catch (error: any) {
-      console.error("Error extracting text from pages:", error);
-      Alert.alert("Error", "Failed to extract text from some pages. Please try again.");
-    } finally {
-      setIsLoading(false);
+      console.error("Error submitting pages for OCR:", error);
+      Alert.alert("Error", "Failed to start text extraction. Please try again.");
       pulseAnim.stopAnimation();
       pulseAnim.setValue(1);
     }
@@ -562,6 +549,13 @@ export default function ScannerScreen() {
   };
 
   const clearScan = () => {
+    // Cancel any active OCR tasks
+    activeOCRTasks.forEach(taskId => {
+      console.log(`🚫 Cancelling OCR task ${taskId}`);
+    });
+    setActiveOCRTasks(new Set());
+    clearResults();
+    
     setSelectedImage(null);
     setExtractedText("");
     setShowFormatter(false);
@@ -574,11 +568,13 @@ export default function ScannerScreen() {
     setImageToEdit(null);
     setShowSignatureManager(false);
     setDocumentSignatures([]);
+    setOcrProgress('');
     
     // Reset animations
     sparkleAnim.setValue(0);
     slideAnim.setValue(0);
     pulseAnim.setValue(1);
+    pulseAnim.stopAnimation();
   };
 
   const openFormatter = () => {
@@ -680,7 +676,7 @@ export default function ScannerScreen() {
           <MultiPageView
             pages={pages}
             selectedPageId={selectedPageId || undefined}
-            isProcessing={isLoading}
+            isProcessing={isProcessing || activeOCRTasks.size > 0}
             onExtractAllText={extractAllPagesText}
             onBack={() => setIsMultiPageMode(false)}
             pulseAnim={pulseAnim}
@@ -702,6 +698,13 @@ export default function ScannerScreen() {
           visible={isOptimizingImage}
           progress={optimizationProgress}
         />
+        
+        <OCRProgressIndicator
+          visible={isProcessing || activeOCRTasks.size > 0}
+          progress={ocrProgress || 'Processing text extraction...'}
+          queueLength={queueStatus.queueLength}
+          activeTasks={queueStatus.activeTasks}
+        />
       </SafeAreaView>
     );
   }
@@ -722,7 +725,7 @@ export default function ScannerScreen() {
           <View style={styles.scanContainer}>
             <ImageScanView
               selectedImage={selectedImage}
-              isLoading={isLoading}
+              isLoading={isProcessing || activeOCRTasks.size > 0}
               onClearScan={clearScan}
               onExtractText={extractText}
               onEditImage={editCurrentImage}
@@ -749,6 +752,13 @@ export default function ScannerScreen() {
       <OptimizationOverlay
         visible={isOptimizingImage}
         progress={optimizationProgress}
+      />
+      
+      <OCRProgressIndicator
+        visible={isProcessing || activeOCRTasks.size > 0}
+        progress={ocrProgress || 'Processing text extraction...'}
+        queueLength={queueStatus.queueLength}
+        activeTasks={queueStatus.activeTasks}
       />
     </SafeAreaView>
   );
