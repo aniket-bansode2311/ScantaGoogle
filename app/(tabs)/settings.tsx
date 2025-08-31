@@ -13,6 +13,7 @@ import { ChevronRight, Info, Trash2, Star, LogOut, User, Settings as SettingsIco
 import { useDocuments } from "@/contexts/DocumentContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOCRSettings } from "@/contexts/OCRSettingsContext";
+import { usePinSecurity } from "@/contexts/PinSecurityContext";
 import LanguageSelector from "@/components/LanguageSelector";
 import CloudSyncToggle from "@/components/CloudSyncToggle";
 import SavedSignaturesManager from "@/components/SavedSignaturesManager";
@@ -21,6 +22,7 @@ export default function SettingsScreen() {
   const { clearAllDocuments, documents } = useDocuments();
   const { user, signOut } = useAuth();
   const { selectedLanguage, getLanguageNativeName } = useOCRSettings();
+  const { isPinEnabled, startPinSetup, disablePin } = usePinSecurity();
 
   const confirmClearHistory = () => {
     const documentCount = documents.length;
@@ -73,6 +75,40 @@ export default function SettingsScreen() {
     );
   };
 
+  const handlePinToggle = () => {
+    if (isPinEnabled) {
+      Alert.alert(
+        "Disable PIN Security",
+        "Are you sure you want to disable PIN protection? Your app will no longer require a PIN to access.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Disable",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await disablePin();
+                Alert.alert(
+                  "PIN Security Disabled",
+                  "PIN protection has been disabled for your app.",
+                  [{ text: "OK" }]
+                );
+              } catch (error) {
+                Alert.alert(
+                  "Error",
+                  "Failed to disable PIN security. Please try again.",
+                  [{ text: "OK" }]
+                );
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      startPinSetup();
+    }
+  };
+
   const SettingItem = ({
     icon,
     title,
@@ -119,6 +155,18 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Security</Text>
+          <View style={styles.sectionContent}>
+            <SettingItem
+              icon={<Shield size={20} color="#0066CC" />}
+              title="PIN Protection"
+              subtitle={isPinEnabled ? "PIN security is enabled" : "Protect your app with a PIN"}
+              onPress={handlePinToggle}
+            />
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.sectionContent}>

@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import createContextHook from '@nkzw/create-context-hook';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, AppStateStatus } from 'react-native';
 
@@ -20,69 +21,71 @@ const PIN_HASH_KEY = '@pin_security_hash';
 const BACKGROUND_TIME_KEY = '@app_background_time';
 const PIN_TIMEOUT = 30000; // 30 seconds
 
+// Simple hash function for PIN storage
 const hashPin = (pin: string): string => {
   let hash = 0;
   for (let i = 0; i < pin.length; i++) {
     const char = pin.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hash = hash & hash; // Convert to 32-bit integer
   }
   return hash.toString();
 };
 
-const PinSecurityContext = createContext<PinSecurityContextType | undefined>(undefined);
-
-export function PinSecurityProvider({ children }: { children: React.ReactNode }) {
+export const [PinSecurityProvider, usePinSecurity] = createContextHook((): PinSecurityContextType => {
   const [isPinEnabled, setIsPinEnabled] = useState<boolean>(false);
   const [isPinRequired, setIsPinRequired] = useState<boolean>(false);
   const [isSettingUp, setIsSettingUp] = useState<boolean>(false);
-  const mountedRef = useRef(true);
+  const [pinHash, setPinHash] = useState<string | null>(null);
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
+  // Load PIN settings on initialization
   useEffect(() => {
     const loadPinSettings = async () => {
       try {
-        const pinEnabled = await AsyncStorage.getItem(PIN_STORAGE_KEY);
-        if (pinEnabled === 'true' && mountedRef.current) {
-          setIsPinEnabled(true);
+        const [enabledValue, hashValue] = await Promise.all([
+          AsyncStorage.getItem(PIN_STORAGE_KEY),
+          AsyncStorage.getItem(PIN_HASH_KEY)
+        ]);
+        
+        const enabled = enabledValue === 'true';
+        setIsPinEnabled(enabled);
+        setPinHash(hashValue);
+        
+        // If PIN is enabled, require it on app start
+        if (enabled && hashValue) {
           setIsPinRequired(true);
         }
       } catch (error) {
-        console.error('Error loading PIN settings:', error);
+        console.error('Failed to load PIN settings:', error);
       }
     };
-
+    
     loadPinSettings();
   }, []);
 
+  // Handle app state changes for PIN timeout
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-      if (!isPinEnabled || !mountedRef.current) return;
-
-      if (nextAppState === 'background') {
+      if (nextAppState === 'background' && isPinEnabled) {
+        // Store the time when app goes to background
         await AsyncStorage.setItem(BACKGROUND_TIME_KEY, Date.now().toString());
-      } else if (nextAppState === 'active') {
+      } else if (nextAppState === 'active' && isPinEnabled) {
+        // Check if PIN should be required when app becomes active
         try {
           const backgroundTimeStr = await AsyncStorage.getItem(BACKGROUND_TIME_KEY);
-          if (backgroundTimeStr && mountedRef.current) {
+          if (backgroundTimeStr) {
             const backgroundTime = parseInt(backgroundTimeStr, 10);
-            const currentTime = Date.now();
-            const timeDiff = currentTime - backgroundTime;
-
+            const timeDiff = Date.now() - backgroundTime;
+            
             if (timeDiff > PIN_TIMEOUT) {
               setIsPinRequired(true);
             }
+            
+            // Clear the background time
+            await AsyncStorage.removeItem(BACKGROUND_TIME_KEY);
           }
         } catch (error) {
-          console.error('Error checking background time:', error);
-          if (mountedRef.current) {
-            setIsPinRequired(true);
-          }
+          console.error('Failed to check background time:', error);
         }
       }
     };
@@ -93,85 +96,74 @@ export function PinSecurityProvider({ children }: { children: React.ReactNode })
 
   const enablePin = useCallback(async (pin: string) => {
     try {
-      const hashedPin = hashPin(pin);
-      await AsyncStorage.setItem(PIN_STORAGE_KEY, 'true');
-      await AsyncStorage.setItem(PIN_HASH_KEY, hashedPin);
+      const hash = hashPin(pin);
+      await Promise.all([
+        AsyncStorage.setItem(PIN_STORAGE_KEY, 'true'),
+        AsyncStorage.setItem(PIN_HASH_KEY, hash)
+      ]);
       
-      if (mountedRef.current) {
-        setIsPinEnabled(true);
-        setIsSettingUp(false);
-      }
-      console.log('PIN security enabled');
+      setIsPinEnabled(true);
+      setPinHash(hash);
+      setIsSettingUp(false);
+      console.log('PIN security enabled successfully');
     } catch (error) {
-      console.error('Error enabling PIN:', error);
+      console.error('Failed to enable PIN:', error);
       throw new Error('Failed to enable PIN security');
     }
   }, []);
 
   const disablePin = useCallback(async () => {
     try {
-      await AsyncStorage.removeItem(PIN_STORAGE_KEY);
-      await AsyncStorage.removeItem(PIN_HASH_KEY);
-      await AsyncStorage.removeItem(BACKGROUND_TIME_KEY);
+      await Promise.all([
+        AsyncStorage.removeItem(PIN_STORAGE_KEY),
+        AsyncStorage.removeItem(PIN_HASH_KEY),
+        AsyncStorage.removeItem(BACKGROUND_TIME_KEY)
+      ]);
       
-      if (mountedRef.current) {
-        setIsPinEnabled(false);
-        setIsPinRequired(false);
-      }
-      console.log('PIN security disabled');
+      setIsPinEnabled(false);
+      setPinHash(null);
+      setIsPinRequired(false);
+      console.log('PIN security disabled successfully');
     } catch (error) {
-      console.error('Error disabling PIN:', error);
+      console.error('Failed to disable PIN:', error);
       throw new Error('Failed to disable PIN security');
     }
   }, []);
 
   const verifyPin = useCallback(async (pin: string): Promise<boolean> => {
-    try {
-      const storedHash = await AsyncStorage.getItem(PIN_HASH_KEY);
-      if (!storedHash) {
-        return false;
-      }
-
-      const inputHash = hashPin(pin);
-      const isValid = inputHash === storedHash;
-      
-      if (isValid && mountedRef.current) {
-        setIsPinRequired(false);
-        console.log('PIN verified successfully');
-      }
-      
-      return isValid;
-    } catch (error) {
-      console.error('Error verifying PIN:', error);
+    if (!pinHash) {
       return false;
     }
-  }, []);
+    
+    const inputHash = hashPin(pin);
+    const isValid = inputHash === pinHash;
+    
+    if (isValid) {
+      setIsPinRequired(false);
+    }
+    
+    return isValid;
+  }, [pinHash]);
 
   const requirePin = useCallback(() => {
-    if (isPinEnabled && mountedRef.current) {
+    if (isPinEnabled) {
       setIsPinRequired(true);
     }
   }, [isPinEnabled]);
 
   const clearPinRequirement = useCallback(() => {
-    if (mountedRef.current) {
-      setIsPinRequired(false);
-    }
+    setIsPinRequired(false);
   }, []);
 
   const startPinSetup = useCallback(() => {
-    if (mountedRef.current) {
-      setIsSettingUp(true);
-    }
+    setIsSettingUp(true);
   }, []);
 
   const cancelPinSetup = useCallback(() => {
-    if (mountedRef.current) {
-      setIsSettingUp(false);
-    }
+    setIsSettingUp(false);
   }, []);
 
-  const value = useMemo(() => ({
+  return useMemo(() => ({
     isPinEnabled,
     isPinRequired,
     isSettingUp,
@@ -194,18 +186,4 @@ export function PinSecurityProvider({ children }: { children: React.ReactNode })
     startPinSetup,
     cancelPinSetup,
   ]);
-
-  return (
-    <PinSecurityContext.Provider value={value}>
-      {children}
-    </PinSecurityContext.Provider>
-  );
-}
-
-export function usePinSecurity() {
-  const context = useContext(PinSecurityContext);
-  if (context === undefined) {
-    throw new Error('usePinSecurity must be used within a PinSecurityProvider');
-  }
-  return context;
-}
+});

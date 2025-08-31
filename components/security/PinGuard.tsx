@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { Alert } from 'react-native';
 import { usePinSecurity } from '@/contexts/PinSecurityContext';
-import PinEntryScreen from './PinEntryScreen';
-import PinSetupScreen from './PinSetupScreen';
+import PinEntry from './PinEntry';
+import PinSetup from './PinSetup';
 
 interface PinGuardProps {
   children: React.ReactNode;
 }
 
-const PinGuard: React.FC<PinGuardProps> = ({ children }) => {
+export default function PinGuard({ children }: PinGuardProps) {
   const {
     isPinRequired,
     isSettingUp,
@@ -15,40 +16,80 @@ const PinGuard: React.FC<PinGuardProps> = ({ children }) => {
     enablePin,
     cancelPinSetup,
   } = usePinSecurity();
+  
+  const pinEntryRef = useRef<any>(null);
 
-  const handlePinVerification = async (pin: string): Promise<boolean> => {
-    return await verifyPin(pin);
+  const handlePinComplete = async (pin: string) => {
+    try {
+      const isValid = await verifyPin(pin);
+      
+      if (!isValid) {
+        // The PinEntry component will handle the error display
+        return;
+      }
+    } catch (error) {
+      console.error('PIN verification error:', error);
+      Alert.alert(
+        'Verification Error',
+        'Failed to verify PIN. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
   };
 
-  const handlePinSetup = async (pin: string): Promise<void> => {
-    await enablePin(pin);
+  const handlePinSetup = async (pin: string) => {
+    try {
+      await enablePin(pin);
+      Alert.alert(
+        'PIN Security Enabled',
+        'Your app is now protected with a PIN. You will be asked to enter it when you open the app.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('PIN setup error:', error);
+      throw error; // Re-throw to let PinSetup handle it
+    }
   };
 
-  const handleCancelSetup = () => {
-    cancelPinSetup();
+  const handleMaxAttemptsReached = () => {
+    Alert.alert(
+      'Too Many Failed Attempts',
+      'You have exceeded the maximum number of PIN attempts. Please restart the app to try again.',
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            // In a real app, you might want to implement a timeout or other security measures
+          },
+        },
+      ]
+    );
   };
 
+  // Show PIN setup screen
   if (isSettingUp) {
     return (
-      <PinSetupScreen
+      <PinSetup
         onPinSet={handlePinSetup}
-        onCancel={handleCancelSetup}
+        onCancel={cancelPinSetup}
       />
     );
   }
 
+  // Show PIN entry screen
   if (isPinRequired) {
     return (
-      <PinEntryScreen
+      <PinEntry
+        ref={pinEntryRef}
         title="Enter PIN"
         subtitle="Enter your PIN to access the app"
-        onPinComplete={handlePinVerification}
-        showCancel={false}
+        onPinComplete={handlePinComplete}
+        maxAttempts={5}
+        onMaxAttemptsReached={handleMaxAttemptsReached}
       />
     );
   }
 
+  // PIN is not required or has been verified
   return <>{children}</>;
-};
-
-export default PinGuard;
+}

@@ -1,4 +1,4 @@
-export { default as PinEntryScreen } from './PinEntryScreen';
-export { default as PinSetupScreen } from './PinSetupScreen';
+export { default as PinEntry } from './PinEntry';
+export { default as PinSetup } from './PinSetup';
 export { default as PinGuard } from './PinGuard';
-export { default as PinSecuritySettings } from './PinSecuritySettings';
+export type { PinEntryRef } from './PinEntry';

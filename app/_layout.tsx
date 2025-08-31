@@ -15,6 +15,8 @@ import { DocumentEditingProvider } from "@/contexts/DocumentEditingContext";
 import { SignatureProvider } from "@/contexts/SignatureContext";
 import { OCRSettingsProvider } from "@/contexts/OCRSettingsContext";
 import { CloudSyncProvider } from "@/contexts/CloudSyncContext";
+import { PinSecurityProvider } from "@/contexts/PinSecurityContext";
+import { PinGuard } from "@/components/security";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -68,17 +70,21 @@ export default function RootLayout() {
         <AuthProvider>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <AuthGuard>
-              <DocumentProvider>
-                <DocumentEditingProvider>
-                  <CloudSyncProvider>
-                    <SignatureProvider>
-                      <OCRSettingsProvider>
-                        <RootLayoutNav />
-                      </OCRSettingsProvider>
-                    </SignatureProvider>
-                  </CloudSyncProvider>
-                </DocumentEditingProvider>
-              </DocumentProvider>
+              <PinSecurityProvider>
+                <PinGuard>
+                  <DocumentProvider>
+                    <DocumentEditingProvider>
+                      <CloudSyncProvider>
+                        <SignatureProvider>
+                          <OCRSettingsProvider>
+                            <RootLayoutNav />
+                          </OCRSettingsProvider>
+                        </SignatureProvider>
+                      </CloudSyncProvider>
+                    </DocumentEditingProvider>
+                  </DocumentProvider>
+                </PinGuard>
+              </PinSecurityProvider>
             </AuthGuard>
           </GestureHandlerRootView>
         </AuthProvider>
