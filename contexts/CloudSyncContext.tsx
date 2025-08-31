@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import createContextHook from '@nkzw/create-context-hook';
+
+// Import the hook functions instead of the context providers
 import { useAuth } from './AuthContext';
 import { useDocuments } from './DocumentContext';
 
@@ -15,9 +16,21 @@ interface CloudStorageUsage {
   percentage: number;
 }
 
+interface CloudSyncContextType {
+  settings: CloudSyncSettings;
+  isLoading: boolean;
+  isSyncing: boolean;
+  toggleAutoSync: () => Promise<void>;
+  performManualSync: () => Promise<void>;
+  getStorageUsage: () => CloudStorageUsage;
+  formatLastSyncTime: () => string;
+}
+
 const CLOUD_SYNC_STORAGE_KEY = 'cloud_sync_settings';
 
-export const [CloudSyncProvider, useCloudSync] = createContextHook(() => {
+const CloudSyncContext = createContext<CloudSyncContextType | undefined>(undefined);
+
+export function CloudSyncProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { documents } = useDocuments();
   const [settings, setSettings] = useState<CloudSyncSettings>({
@@ -123,7 +136,7 @@ export const [CloudSyncProvider, useCloudSync] = createContextHook(() => {
     return syncDate.toLocaleDateString();
   }, [settings.lastSyncTime]);
 
-  return useMemo(() => ({
+  const value = useMemo(() => ({
     settings,
     isLoading,
     isSyncing,
@@ -132,4 +145,18 @@ export const [CloudSyncProvider, useCloudSync] = createContextHook(() => {
     getStorageUsage,
     formatLastSyncTime,
   }), [settings, isLoading, isSyncing, toggleAutoSync, performManualSync, getStorageUsage, formatLastSyncTime]);
-});
+
+  return (
+    <CloudSyncContext.Provider value={value}>
+      {children}
+    </CloudSyncContext.Provider>
+  );
+}
+
+export function useCloudSync() {
+  const context = useContext(CloudSyncContext);
+  if (context === undefined) {
+    throw new Error('useCloudSync must be used within a CloudSyncProvider');
+  }
+  return context;
+}
