@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { documents, Document } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
 import { createProgressiveThumbnails } from '@/lib/imageOptimizer';
@@ -32,8 +32,15 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
   const [thumbnailGenerationQueue, setThumbnailGenerationQueue] = useState<Set<string>>(new Set());
+  const mountedRef = useRef(true);
 
-  // Update document function with useCallback
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const updateDocument = useCallback(async (id: string, updates: Partial<Document>) => {
     try {
       const { data, error } = await documents.update(id, updates);
@@ -43,7 +50,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         return { data: null, error };
       }
 
-      if (data) {
+      if (data && mountedRef.current) {
         setDocs(prev => prev.map(doc => doc.id === id ? (data as Document) : doc));
       }
 
@@ -54,12 +61,13 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Generate thumbnails for a specific document
   const generateThumbnailsForDocument = useCallback(async (documentId: string, imageUri: string) => {
     if (thumbnailGenerationQueue.has(documentId)) {
       console.log(`⏭️ Skipping thumbnail generation for ${documentId} - already in queue`);
       return;
     }
+
+    if (!mountedRef.current) return;
 
     setThumbnailGenerationQueue(prev => new Set([...prev, documentId]));
 
@@ -69,7 +77,8 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       const thumbnails = await createProgressiveThumbnails(imageUri);
       endTracking();
       
-      // Update document with thumbnail URLs
+      if (!mountedRef.current) return;
+      
       const updates = {
         thumbnail_low_url: thumbnails.lowRes.uri,
         thumbnail_medium_url: thumbnails.mediumRes.uri,
@@ -79,35 +88,33 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       await updateDocument(documentId, updates);
       console.log(`✅ Thumbnails generated and saved for document ${documentId}`);
       
-      // Report performance after a batch of thumbnails
-      if (Math.random() < 0.1) { // 10% chance to show report
+      if (Math.random() < 0.1) {
         setTimeout(() => trackPerformance.report(), 1000);
       }
       
     } catch (error) {
       console.error(`❌ Failed to generate thumbnails for document ${documentId}:`, error);
     } finally {
-      setThumbnailGenerationQueue(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(documentId);
-        return newSet;
-      });
+      if (mountedRef.current) {
+        setThumbnailGenerationQueue(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(documentId);
+          return newSet;
+        });
+      }
     }
-  }, [thumbnailGenerationQueue, updateDocument]);
+  }, [updateDocument, thumbnailGenerationQueue]);
 
-  // Generate thumbnails for documents that don't have them using optimized query
   const generateMissingThumbnails = useCallback(async (documentsToCheck?: Document[]) => {
-    if (!user) return;
+    if (!user || !mountedRef.current) return;
 
     let documentsNeedingThumbnails: Pick<Document, 'id' | 'image_url' | 'created_at'>[];
     
     if (documentsToCheck) {
-      // Use provided documents (for immediate processing)
       documentsNeedingThumbnails = documentsToCheck
         .filter(doc => doc.image_url && !doc.thumbnail_low_url && !thumbnailGenerationQueue.has(doc.id))
         .map(doc => ({ id: doc.id, image_url: doc.image_url!, created_at: doc.created_at }));
     } else {
-      // Use optimized query to get documents needing thumbnails
       const { data } = await documents.getDocumentsNeedingThumbnails(user.id, 10);
       documentsNeedingThumbnails = (data || []).filter(doc => !thumbnailGenerationQueue.has(doc.id));
     }
@@ -116,55 +123,48 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
 
     console.log(`🖼️ Generating thumbnails for ${documentsNeedingThumbnails.length} documents`);
 
-    // Process in small batches to avoid overwhelming the system
     const batchSize = 2;
-    for (let i = 0; i < documentsNeedingThumbnails.length; i += batchSize) {
+    for (let i = 0; i < documentsNeedingThumbnails.length && mountedRef.current; i += batchSize) {
       const batch = documentsNeedingThumbnails.slice(i, i + batchSize);
       
       await Promise.all(
         batch.map(async (doc) => {
-          if (doc.image_url) {
+          if (doc.image_url && mountedRef.current) {
             await generateThumbnailsForDocument(doc.id, doc.image_url);
           }
         })
       );
       
-      // Small delay between batches
-      if (i + batchSize < documentsNeedingThumbnails.length) {
+      if (i + batchSize < documentsNeedingThumbnails.length && mountedRef.current) {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
   }, [user, thumbnailGenerationQueue, generateThumbnailsForDocument]);
 
-  const loadDocuments = useCallback(async (reset: boolean = true, immediate: boolean = false) => {
-    if (!user) {
-      setDocs([]);
-      setTotalCount(0);
-      setHasMore(false);
+  const loadDocuments = useCallback(async (reset: boolean = true) => {
+    if (!user || !mountedRef.current) {
+      if (mountedRef.current) {
+        setDocs([]);
+        setTotalCount(0);
+        setHasMore(false);
+      }
       return;
     }
 
-    if (reset) {
+    if (reset && mountedRef.current) {
       setLoading(true);
       setDocs([]);
-    }
-
-    // Defer initial load for better cold start performance
-    if (!immediate && reset) {
-      setTimeout(() => loadDocuments(reset, true), 500);
-      setLoading(false);
-      return;
     }
 
     try {
       const offset = reset ? 0 : docs.length;
       const endTracking = trackPerformance.documentListLoad(DOCUMENTS_PER_PAGE);
       
-      // Get total count
       const { count } = await documents.getCount(user.id);
-      setTotalCount(count || 0);
+      if (mountedRef.current) {
+        setTotalCount(count || 0);
+      }
       
-      // Get documents for current page
       const { data, error } = await documents.getAll(user.id, {
         limit: DOCUMENTS_PER_PAGE,
         offset
@@ -172,38 +172,37 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       
       endTracking();
       
+      if (!mountedRef.current) return;
+      
       if (error) {
         console.error('Error loading documents:', error);
       } else {
         const newDocs = (data as Document[]) || [];
         if (reset) {
           setDocs(newDocs);
-          // Start generating thumbnails for documents without them
           setTimeout(() => generateMissingThumbnails(newDocs), 1000);
         } else {
           setDocs(prev => {
             const combined = [...prev, ...newDocs];
-            // Generate thumbnails for new documents
             setTimeout(() => generateMissingThumbnails(newDocs), 500);
             return combined;
           });
         }
         
-        // Check if there are more documents to load
         const totalLoaded = reset ? newDocs.length : docs.length + newDocs.length;
         setHasMore(totalLoaded < (count || 0));
       }
     } catch (error) {
       console.error('Error loading documents:', error);
     } finally {
-      if (reset) {
+      if (reset && mountedRef.current) {
         setLoading(false);
       }
     }
   }, [user, docs.length, generateMissingThumbnails]);
 
-  const loadMoreDocuments = async () => {
-    if (!user || loadingMore || !hasMore) {
+  const loadMoreDocuments = useCallback(async () => {
+    if (!user || loadingMore || !hasMore || !mountedRef.current) {
       return;
     }
 
@@ -216,36 +215,37 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         offset
       });
       
+      if (!mountedRef.current) return;
+      
       if (error) {
         console.error('Error loading more documents:', error);
       } else {
         const newDocs = (data as Document[]) || [];
         setDocs(prev => {
           const combined = [...prev, ...newDocs];
-          // Generate thumbnails for new documents
           setTimeout(() => generateMissingThumbnails(newDocs), 500);
           return combined;
         });
         
-        // Check if there are more documents to load
         const totalLoaded = docs.length + newDocs.length;
         setHasMore(totalLoaded < totalCount);
       }
     } catch (error) {
       console.error('Error loading more documents:', error);
     } finally {
-      setLoadingMore(false);
+      if (mountedRef.current) {
+        setLoadingMore(false);
+      }
     }
-  };
+  }, [user, loadingMore, hasMore, docs.length, totalCount, generateMissingThumbnails]);
 
   useEffect(() => {
-    // Only load documents when user is available and defer for cold start optimization
-    if (user) {
+    if (user && mountedRef.current) {
       loadDocuments();
     }
   }, [user, loadDocuments]);
 
-  const addDocument = async (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
+  const addDocument = useCallback(async (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
     if (!user) {
       return { data: null, error: { message: 'User not authenticated' } };
     }
@@ -261,7 +261,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         return { data: null, error };
       }
 
-      if (data) {
+      if (data && mountedRef.current) {
         setDocs(prev => [(data as Document), ...prev]);
       }
 
@@ -270,11 +270,9 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       console.error('Error adding document:', error);
       return { data: null, error: { message: 'Failed to add document' } };
     }
-  };
+  }, [user]);
 
-
-
-  const deleteDocument = async (id: string) => {
+  const deleteDocument = useCallback(async (id: string) => {
     try {
       const { error } = await documents.delete(id);
 
@@ -283,33 +281,36 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         throw error;
       }
 
-      setDocs(prev => prev.filter(doc => doc.id !== id));
+      if (mountedRef.current) {
+        setDocs(prev => prev.filter(doc => doc.id !== id));
+      }
     } catch (error) {
       console.error('Error deleting document:', error);
       throw error;
     }
-  };
+  }, []);
 
-  const clearAllDocuments = async () => {
+  const clearAllDocuments = useCallback(async () => {
     if (!user) return;
 
     try {
-      // Delete all documents for the user
       const deletePromises = docs.map(doc => documents.delete(doc.id));
       await Promise.all(deletePromises);
       
-      setDocs([]);
+      if (mountedRef.current) {
+        setDocs([]);
+      }
     } catch (error) {
       console.error('Error clearing all documents:', error);
       throw error;
     }
-  };
+  }, [user, docs]);
 
-  const refreshDocuments = async () => {
+  const refreshDocuments = useCallback(async () => {
     await loadDocuments(true);
-  };
+  }, [loadDocuments]);
 
-  const searchDocuments = async (query: string): Promise<Document[]> => {
+  const searchDocuments = useCallback(async (query: string): Promise<Document[]> => {
     if (!user || !query.trim()) {
       return docs;
     }
@@ -325,7 +326,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       console.error('Error searching documents:', error);
       return [];
     }
-  };
+  }, [user, docs]);
 
   const value: DocumentContextType = {
     documents: docs,
@@ -333,8 +334,8 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     loadingMore,
     hasMore,
     totalCount,
-    addDocument: addDocument as (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => Promise<{ data: Document | null; error: any }>,
-    updateDocument: updateDocument as (id: string, updates: Partial<Document>) => Promise<{ data: Document | null; error: any }>,
+    addDocument,
+    updateDocument,
     deleteDocument,
     clearAllDocuments,
     refreshDocuments,
