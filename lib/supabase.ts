@@ -334,18 +334,72 @@ export const documents = {
     }
   },
 
-  search: async (userId: string, query: string) => {
+  search: async (userId: string, query: string, options?: { limit?: number; offset?: number }) => {
     try {
-      const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('user_id', userId)
-        .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
-        .order('created_at', { ascending: false });
+      // Use the optimized FTS function for better performance
+      const { data, error } = await supabase.rpc('search_documents_ranked', {
+        p_user_id: userId,
+        p_search_query: query,
+        p_limit: options?.limit || 50,
+        p_offset: options?.offset || 0
+      });
+      
       return { data: data as Document[] | null, error };
     } catch (err) {
       console.error('Document search error:', err);
-      return { data: null, error: { message: 'Failed to search documents' } };
+      // Fallback to basic search if FTS function fails
+      try {
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .eq('user_id', userId)
+          .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+          .order('created_at', { ascending: false })
+          .limit(options?.limit || 50)
+          .range(options?.offset || 0, (options?.offset || 0) + (options?.limit || 50) - 1);
+        return { data: data as Document[] | null, error };
+      } catch (fallbackErr) {
+        console.error('Fallback search error:', fallbackErr);
+        return { data: null, error: { message: 'Failed to search documents' } };
+      }
+    }
+  },
+
+  // New optimized method for getting documents with missing thumbnails
+  getDocumentsNeedingThumbnails: async (userId: string, limit: number = 10) => {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, image_url, created_at')
+        .eq('user_id', userId)
+        .not('image_url', 'is', null)
+        .is('thumbnail_low_url', null)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      return { data: data as Pick<Document, 'id' | 'image_url' | 'created_at'>[] | null, error };
+    } catch (err) {
+      console.error('Documents needing thumbnails fetch error:', err);
+      return { data: null, error: { message: 'Failed to fetch documents needing thumbnails' } };
+    }
+  },
+
+  // Optimized method for bulk thumbnail updates
+  updateThumbnails: async (documentId: string, thumbnails: { 
+    thumbnail_low_url?: string; 
+    thumbnail_medium_url?: string; 
+    thumbnail_high_url?: string; 
+  }) => {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .update(thumbnails)
+        .eq('id', documentId)
+        .select('id, thumbnail_low_url, thumbnail_medium_url, thumbnail_high_url')
+        .single();
+      return { data, error };
+    } catch (err) {
+      console.error('Thumbnail update error:', err);
+      return { data: null, error: { message: 'Failed to update thumbnails' } };
     }
   },
 };

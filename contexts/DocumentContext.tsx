@@ -95,11 +95,22 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     }
   }, [thumbnailGenerationQueue, updateDocument]);
 
-  // Generate thumbnails for documents that don't have them
-  const generateMissingThumbnails = useCallback(async (documentsToCheck: Document[]) => {
-    const documentsNeedingThumbnails = documentsToCheck.filter(
-      doc => doc.image_url && !doc.thumbnail_low_url && !thumbnailGenerationQueue.has(doc.id)
-    );
+  // Generate thumbnails for documents that don't have them using optimized query
+  const generateMissingThumbnails = useCallback(async (documentsToCheck?: Document[]) => {
+    if (!user) return;
+
+    let documentsNeedingThumbnails: Pick<Document, 'id' | 'image_url' | 'created_at'>[];
+    
+    if (documentsToCheck) {
+      // Use provided documents (for immediate processing)
+      documentsNeedingThumbnails = documentsToCheck
+        .filter(doc => doc.image_url && !doc.thumbnail_low_url && !thumbnailGenerationQueue.has(doc.id))
+        .map(doc => ({ id: doc.id, image_url: doc.image_url!, created_at: doc.created_at }));
+    } else {
+      // Use optimized query to get documents needing thumbnails
+      const { data } = await documents.getDocumentsNeedingThumbnails(user.id, 10);
+      documentsNeedingThumbnails = (data || []).filter(doc => !thumbnailGenerationQueue.has(doc.id));
+    }
 
     if (documentsNeedingThumbnails.length === 0) return;
 
@@ -123,7 +134,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-  }, [thumbnailGenerationQueue, generateThumbnailsForDocument]);
+  }, [user, thumbnailGenerationQueue, generateThumbnailsForDocument]);
 
   const loadDocuments = useCallback(async (reset: boolean = true, immediate: boolean = false) => {
     if (!user) {
