@@ -57,6 +57,82 @@ CREATE TRIGGER update_documents_updated_at
 CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
 
+-- 6.1. Add Full-Text Search indexes for efficient text searching
+-- Create GIN indexes for Full-Text Search on title and content columns
+CREATE INDEX IF NOT EXISTS idx_documents_title_fts ON documents USING GIN (to_tsvector('english', title));
+CREATE INDEX IF NOT EXISTS idx_documents_content_fts ON documents USING GIN (to_tsvector('english', content));
+
+-- Create a combined FTS index for searching across both title and content
+CREATE INDEX IF NOT EXISTS idx_documents_combined_fts ON documents USING GIN (
+  to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(content, ''))
+);
+
+-- Create a function for ranking search results
+CREATE OR REPLACE FUNCTION search_documents_ranked(
+  p_user_id UUID,
+  p_search_query TEXT,
+  p_limit INTEGER DEFAULT 50,
+  p_offset INTEGER DEFAULT 0
+)
+RETURNS TABLE (
+  id UUID,
+  user_id UUID,
+  title TEXT,
+  content TEXT,
+  formatted_content TEXT,
+  image_url TEXT,
+  thumbnail_low_url TEXT,
+  thumbnail_medium_url TEXT,
+  thumbnail_high_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE,
+  updated_at TIMESTAMP WITH TIME ZONE,
+  search_rank REAL,
+  search_headline_title TEXT,
+  search_headline_content TEXT
+) AS $
+BEGIN
+  RETURN QUERY
+  SELECT 
+    d.id,
+    d.user_id,
+    d.title,
+    d.content,
+    d.formatted_content,
+    d.image_url,
+    d.thumbnail_low_url,
+    d.thumbnail_medium_url,
+    d.thumbnail_high_url,
+    d.created_at,
+    d.updated_at,
+    -- Calculate relevance ranking
+    (
+      ts_rank_cd(to_tsvector('english', d.title), plainto_tsquery('english', p_search_query)) * 2.0 +
+      ts_rank_cd(to_tsvector('english', d.content), plainto_tsquery('english', p_search_query))
+    ) AS search_rank,
+    -- Generate highlighted snippets for title
+    ts_headline('english', d.title, plainto_tsquery('english', p_search_query), 
+      'MaxWords=10, MinWords=1, ShortWord=3, HighlightAll=false, MaxFragments=1'
+    ) AS search_headline_title,
+    -- Generate highlighted snippets for content
+    ts_headline('english', d.content, plainto_tsquery('english', p_search_query), 
+      'MaxWords=35, MinWords=5, ShortWord=3, HighlightAll=false, MaxFragments=2'
+    ) AS search_headline_content
+  FROM documents d
+  WHERE 
+    d.user_id = p_user_id
+    AND (
+      to_tsvector('english', d.title) @@ plainto_tsquery('english', p_search_query)
+      OR to_tsvector('english', d.content) @@ plainto_tsquery('english', p_search_query)
+    )
+  ORDER BY search_rank DESC, d.created_at DESC
+  LIMIT p_limit
+  OFFSET p_offset;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION search_documents_ranked(UUID, TEXT, INTEGER, INTEGER) TO authenticated;
+
 -- 7. Create a profiles table for additional user information
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
