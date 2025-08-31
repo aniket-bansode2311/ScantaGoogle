@@ -16,6 +16,7 @@ export interface OptimizedImageResult {
   originalSizeKB: number;
   optimizedSizeKB: number;
   compressionRatio: number;
+  thumbnails?: ProgressiveThumbnails;
 }
 
 const DEFAULT_OPTIONS: Required<ImageOptimizationOptions> = {
@@ -200,6 +201,183 @@ export const optimizeDocumentImage = async (
     targetSizeKB: 600, // Smaller target for faster upload
     format: ImageManipulator.SaveFormat.JPEG,
   });
+};
+
+/**
+ * Create progressive thumbnails for fast loading
+ */
+export interface ThumbnailResult {
+  uri: string;
+  width: number;
+  height: number;
+  sizeKB: number;
+}
+
+export interface ProgressiveThumbnails {
+  lowRes: ThumbnailResult;
+  mediumRes: ThumbnailResult;
+  highRes?: ThumbnailResult;
+}
+
+export const createProgressiveThumbnails = async (
+  imageUri: string
+): Promise<ProgressiveThumbnails> => {
+  console.log('🖼️ Creating progressive thumbnails for:', imageUri);
+  const startTime = Date.now();
+  
+  try {
+    // Create low-res thumbnail (80x80, very fast loading)
+    const lowResResult = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width: 80, height: 80 } }],
+      {
+        compress: 0.4,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
+    );
+    
+    // Create medium-res thumbnail (200x200, for list view)
+    const mediumResResult = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width: 200, height: 200 } }],
+      {
+        compress: 0.6,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
+    );
+    
+    // Create high-res thumbnail (400x400, for detail view)
+    const highResResult = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width: 400, height: 400 } }],
+      {
+        compress: 0.7,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
+    );
+    
+    const [lowResSizeKB, mediumResSizeKB, highResSizeKB] = await Promise.all([
+      getFileSizeKB(lowResResult.uri),
+      getFileSizeKB(mediumResResult.uri),
+      getFileSizeKB(highResResult.uri),
+    ]);
+    
+    const processingTime = Date.now() - startTime;
+    console.log(`✅ Progressive thumbnails created in ${processingTime}ms`);
+    console.log(`   Low-res: ${lowResSizeKB}KB (${lowResResult.width}x${lowResResult.height})`);
+    console.log(`   Medium-res: ${mediumResSizeKB}KB (${mediumResResult.width}x${mediumResResult.height})`);
+    console.log(`   High-res: ${highResSizeKB}KB (${highResResult.width}x${highResResult.height})`);
+    
+    return {
+      lowRes: {
+        uri: lowResResult.uri,
+        width: lowResResult.width,
+        height: lowResResult.height,
+        sizeKB: lowResSizeKB,
+      },
+      mediumRes: {
+        uri: mediumResResult.uri,
+        width: mediumResResult.width,
+        height: mediumResResult.height,
+        sizeKB: mediumResSizeKB,
+      },
+      highRes: {
+        uri: highResResult.uri,
+        width: highResResult.width,
+        height: highResResult.height,
+        sizeKB: highResSizeKB,
+      },
+    };
+  } catch (error) {
+    console.error('❌ Error creating progressive thumbnails:', error);
+    // Return fallback with original image
+    const fallbackSize = await getFileSizeKB(imageUri);
+    const fallback: ThumbnailResult = {
+      uri: imageUri,
+      width: 200,
+      height: 200,
+      sizeKB: fallbackSize,
+    };
+    return {
+      lowRes: fallback,
+      mediumRes: fallback,
+      highRes: fallback,
+    };
+  }
+};
+
+/**
+ * Create a single thumbnail with specified dimensions
+ */
+export const createThumbnail = async (
+  imageUri: string,
+  width: number = 200,
+  height: number = 200,
+  quality: number = 0.6
+): Promise<ThumbnailResult> => {
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width, height } }],
+      {
+        compress: quality,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
+    );
+    
+    const sizeKB = await getFileSizeKB(result.uri);
+    
+    return {
+      uri: result.uri,
+      width: result.width,
+      height: result.height,
+      sizeKB,
+    };
+  } catch (error) {
+    console.error('❌ Error creating thumbnail:', error);
+    const fallbackSize = await getFileSizeKB(imageUri);
+    return {
+      uri: imageUri,
+      width,
+      height,
+      sizeKB: fallbackSize,
+    };
+  }
+};
+
+/**
+ * Batch create thumbnails for multiple images
+ */
+export const createBatchThumbnails = async (
+  imageUris: string[],
+  width: number = 200,
+  height: number = 200,
+  onProgress?: (current: number, total: number) => void
+): Promise<ThumbnailResult[]> => {
+  console.log(`🔄 Creating ${imageUris.length} thumbnails...`);
+  const startTime = Date.now();
+  
+  const results: ThumbnailResult[] = [];
+  const batchSize = 3; // Process in small batches to avoid memory issues
+  
+  for (let i = 0; i < imageUris.length; i += batchSize) {
+    const batch = imageUris.slice(i, i + batchSize);
+    const batchPromises = batch.map(uri => createThumbnail(uri, width, height));
+    const batchResults = await Promise.all(batchPromises);
+    
+    results.push(...batchResults);
+    onProgress?.(Math.min(i + batchSize, imageUris.length), imageUris.length);
+    
+    // Small delay between batches
+    if (i + batchSize < imageUris.length) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  
+  const totalTime = Date.now() - startTime;
+  console.log(`✅ Batch thumbnail creation completed in ${totalTime}ms`);
+  
+  return results;
 };
 
 /**

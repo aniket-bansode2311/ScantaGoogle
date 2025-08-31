@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   Alert,
   Dimensions,
   TextInput,
@@ -18,6 +17,7 @@ import * as Clipboard from "expo-clipboard";
 import { useDocuments } from "@/contexts/DocumentContext";
 import { Document } from "@/lib/supabase";
 import TextFormatter from "@/components/TextFormatter";
+import ProgressiveImage from "@/components/ProgressiveImage";
 
 const { width } = Dimensions.get('window');
 
@@ -126,7 +126,19 @@ export default function HistoryScreen() {
       <View style={styles.scanContent}>
         <View style={styles.scanImageContainer}>
           {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.thumbnail} />
+            <ProgressiveImage
+              lowResUri={item.thumbnail_low_url}
+              mediumResUri={item.thumbnail_medium_url}
+              highResUri={item.thumbnail_high_url}
+              fullResUri={item.image_url}
+              style={styles.thumbnail}
+              loadFullResOnMount={false}
+              placeholder={
+                <View style={[styles.thumbnail, styles.placeholderThumbnail]}>
+                  <FileText size={24} color="#6B7280" />
+                </View>
+              }
+            />
           ) : (
             <View style={[styles.thumbnail, styles.placeholderThumbnail]}>
               <FileText size={24} color="#6B7280" />

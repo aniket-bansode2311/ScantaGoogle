@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { documents, Document } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
+import { createProgressiveThumbnails } from '@/lib/imageOptimizer';
+import { trackPerformance } from '@/lib/performanceMonitor';
 
 interface DocumentContextType {
   documents: Document[];
@@ -15,6 +17,7 @@ interface DocumentContextType {
   refreshDocuments: () => Promise<void>;
   loadMoreDocuments: () => Promise<void>;
   searchDocuments: (query: string) => Promise<Document[]>;
+  generateThumbnailsForDocument: (documentId: string, imageUri: string) => Promise<void>;
 }
 
 const DocumentContext = createContext<DocumentContextType | undefined>(undefined);
@@ -28,6 +31,99 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
+  const [thumbnailGenerationQueue, setThumbnailGenerationQueue] = useState<Set<string>>(new Set());
+
+  // Update document function with useCallback
+  const updateDocument = useCallback(async (id: string, updates: Partial<Document>) => {
+    try {
+      const { data, error } = await documents.update(id, updates);
+
+      if (error) {
+        console.error('Error updating document:', error);
+        return { data: null, error };
+      }
+
+      if (data) {
+        setDocs(prev => prev.map(doc => doc.id === id ? (data as Document) : doc));
+      }
+
+      return { data: data as Document | null, error: null };
+    } catch (error) {
+      console.error('Error updating document:', error);
+      return { data: null, error: { message: 'Failed to update document' } };
+    }
+  }, []);
+
+  // Generate thumbnails for a specific document
+  const generateThumbnailsForDocument = useCallback(async (documentId: string, imageUri: string) => {
+    if (thumbnailGenerationQueue.has(documentId)) {
+      console.log(`⏭️ Skipping thumbnail generation for ${documentId} - already in queue`);
+      return;
+    }
+
+    setThumbnailGenerationQueue(prev => new Set([...prev, documentId]));
+
+    try {
+      console.log(`🖼️ Generating progressive thumbnails for document ${documentId}`);
+      const endTracking = trackPerformance.thumbnailGeneration(documentId);
+      const thumbnails = await createProgressiveThumbnails(imageUri);
+      endTracking();
+      
+      // Update document with thumbnail URLs
+      const updates = {
+        thumbnail_low_url: thumbnails.lowRes.uri,
+        thumbnail_medium_url: thumbnails.mediumRes.uri,
+        thumbnail_high_url: thumbnails.highRes?.uri,
+      };
+      
+      await updateDocument(documentId, updates);
+      console.log(`✅ Thumbnails generated and saved for document ${documentId}`);
+      
+      // Report performance after a batch of thumbnails
+      if (Math.random() < 0.1) { // 10% chance to show report
+        setTimeout(() => trackPerformance.report(), 1000);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to generate thumbnails for document ${documentId}:`, error);
+    } finally {
+      setThumbnailGenerationQueue(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(documentId);
+        return newSet;
+      });
+    }
+  }, [thumbnailGenerationQueue, updateDocument]);
+
+  // Generate thumbnails for documents that don't have them
+  const generateMissingThumbnails = useCallback(async (documentsToCheck: Document[]) => {
+    const documentsNeedingThumbnails = documentsToCheck.filter(
+      doc => doc.image_url && !doc.thumbnail_low_url && !thumbnailGenerationQueue.has(doc.id)
+    );
+
+    if (documentsNeedingThumbnails.length === 0) return;
+
+    console.log(`🖼️ Generating thumbnails for ${documentsNeedingThumbnails.length} documents`);
+
+    // Process in small batches to avoid overwhelming the system
+    const batchSize = 2;
+    for (let i = 0; i < documentsNeedingThumbnails.length; i += batchSize) {
+      const batch = documentsNeedingThumbnails.slice(i, i + batchSize);
+      
+      await Promise.all(
+        batch.map(async (doc) => {
+          if (doc.image_url) {
+            await generateThumbnailsForDocument(doc.id, doc.image_url);
+          }
+        })
+      );
+      
+      // Small delay between batches
+      if (i + batchSize < documentsNeedingThumbnails.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+  }, [thumbnailGenerationQueue, generateThumbnailsForDocument]);
 
   const loadDocuments = useCallback(async (reset: boolean = true, immediate: boolean = false) => {
     if (!user) {
@@ -51,6 +147,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const offset = reset ? 0 : docs.length;
+      const endTracking = trackPerformance.documentListLoad(DOCUMENTS_PER_PAGE);
       
       // Get total count
       const { count } = await documents.getCount(user.id);
@@ -62,14 +159,23 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         offset
       });
       
+      endTracking();
+      
       if (error) {
         console.error('Error loading documents:', error);
       } else {
-        const newDocs = data || [];
+        const newDocs = (data as Document[]) || [];
         if (reset) {
-          setDocs(newDocs || []);
+          setDocs(newDocs);
+          // Start generating thumbnails for documents without them
+          setTimeout(() => generateMissingThumbnails(newDocs), 1000);
         } else {
-          setDocs(prev => [...prev, ...(newDocs || [])]);
+          setDocs(prev => {
+            const combined = [...prev, ...newDocs];
+            // Generate thumbnails for new documents
+            setTimeout(() => generateMissingThumbnails(newDocs), 500);
+            return combined;
+          });
         }
         
         // Check if there are more documents to load
@@ -83,7 +189,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
     }
-  }, [user, docs.length]);
+  }, [user, docs.length, generateMissingThumbnails]);
 
   const loadMoreDocuments = async () => {
     if (!user || loadingMore || !hasMore) {
@@ -102,8 +208,13 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         console.error('Error loading more documents:', error);
       } else {
-        const newDocs = data || [];
-        setDocs(prev => [...prev, ...newDocs]);
+        const newDocs = (data as Document[]) || [];
+        setDocs(prev => {
+          const combined = [...prev, ...newDocs];
+          // Generate thumbnails for new documents
+          setTimeout(() => generateMissingThumbnails(newDocs), 500);
+          return combined;
+        });
         
         // Check if there are more documents to load
         const totalLoaded = docs.length + newDocs.length;
@@ -140,7 +251,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        setDocs(prev => [data, ...prev]);
+        setDocs(prev => [(data as Document), ...prev]);
       }
 
       return { data: data as Document | null, error: null };
@@ -150,25 +261,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const updateDocument = async (id: string, updates: Partial<Document>) => {
-    try {
-      const { data, error } = await documents.update(id, updates);
 
-      if (error) {
-        console.error('Error updating document:', error);
-        return { data: null, error };
-      }
-
-      if (data) {
-        setDocs(prev => prev.map(doc => doc.id === id ? data : doc));
-      }
-
-      return { data: data as Document | null, error: null };
-    } catch (error) {
-      console.error('Error updating document:', error);
-      return { data: null, error: { message: 'Failed to update document' } };
-    }
-  };
 
   const deleteDocument = async (id: string) => {
     try {
@@ -216,7 +309,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         console.error('Error searching documents:', error);
         return [];
       }
-      return data || [];
+      return (data as Document[]) || [];
     } catch (error) {
       console.error('Error searching documents:', error);
       return [];
@@ -229,13 +322,14 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     loadingMore,
     hasMore,
     totalCount,
-    addDocument,
-    updateDocument,
+    addDocument: addDocument as (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => Promise<{ data: Document | null; error: any }>,
+    updateDocument: updateDocument as (id: string, updates: Partial<Document>) => Promise<{ data: Document | null; error: any }>,
     deleteDocument,
     clearAllDocuments,
     refreshDocuments,
     loadMoreDocuments,
     searchDocuments,
+    generateThumbnailsForDocument,
   };
 
   return (

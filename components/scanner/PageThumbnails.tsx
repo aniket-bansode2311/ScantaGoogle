@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   ScrollView,
   Alert,
 } from 'react-native';
 import { Plus, X, Move, Camera, ImageIcon } from 'lucide-react-native';
 import { DocumentPage } from '@/types/scan';
+import ProgressiveImage from '@/components/ProgressiveImage';
 
 interface PageThumbnailsProps {
   pages: DocumentPage[];
@@ -104,7 +104,13 @@ export default function PageThumbnails({
               ]}
               onPress={() => onSelectPage?.(page.id)}
             >
-              <Image source={{ uri: page.imageUri }} style={styles.thumbnailImage} />
+              <ProgressiveImage
+                lowResUri={page.imageUri} // For now, use the same URI for all resolutions
+                mediumResUri={page.imageUri}
+                fullResUri={page.imageUri}
+                style={styles.thumbnailImage}
+                loadFullResOnMount={false}
+              />
               <View style={styles.pageNumber}>
                 <Text style={styles.pageNumberText}>{index + 1}</Text>
               </View>

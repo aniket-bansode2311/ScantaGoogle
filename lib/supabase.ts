@@ -51,6 +51,9 @@ export interface Document {
   content: string;
   formatted_content?: string;
   image_url?: string;
+  thumbnail_low_url?: string;
+  thumbnail_medium_url?: string;
+  thumbnail_high_url?: string;
   created_at: string;
   updated_at: string;
 }

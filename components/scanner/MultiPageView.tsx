@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Animated,
 } from 'react-native';
 import { Zap, FileText, ArrowLeft } from 'lucide-react-native';
 import { DocumentPage } from '@/types/scan';
+import ProgressiveImage from '@/components/ProgressiveImage';
 
 interface MultiPageViewProps {
   pages: DocumentPage[];
@@ -44,7 +44,13 @@ export default function MultiPageView({
       </View>
 
       <View style={styles.previewContainer}>
-        <Image source={{ uri: selectedPage.imageUri }} style={styles.previewImage} />
+        <ProgressiveImage
+          lowResUri={selectedPage.imageUri}
+          mediumResUri={selectedPage.imageUri}
+          fullResUri={selectedPage.imageUri}
+          style={styles.previewImage}
+          loadFullResOnMount={true}
+        />
         
         <View style={styles.pageInfo}>
           <Text style={styles.pageTitle}>
