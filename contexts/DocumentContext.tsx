@@ -44,10 +44,10 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        setDocs(prev => prev.map(doc => doc.id === id ? (data as Document) : doc));
+        setDocs(prev => prev.map(doc => doc.id === id ? data : doc));
       }
 
-      return { data: data as Document | null, error: null };
+      return { data, error: null };
     } catch (error) {
       console.error('Error updating document:', error);
       return { data: null, error: { message: 'Failed to update document' } };
@@ -175,7 +175,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         console.error('Error loading documents:', error);
       } else {
-        const newDocs = (data as Document[]) || [];
+        const newDocs = data || [];
         if (reset) {
           setDocs(newDocs);
           // Start generating thumbnails for documents without them
@@ -219,7 +219,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         console.error('Error loading more documents:', error);
       } else {
-        const newDocs = (data as Document[]) || [];
+        const newDocs = data || [];
         setDocs(prev => {
           const combined = [...prev, ...newDocs];
           // Generate thumbnails for new documents
@@ -262,10 +262,10 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        setDocs(prev => [(data as Document), ...prev]);
+        setDocs(prev => [data, ...prev]);
       }
 
-      return { data: data as Document | null, error: null };
+      return { data, error: null };
     } catch (error) {
       console.error('Error adding document:', error);
       return { data: null, error: { message: 'Failed to add document' } };
@@ -320,7 +320,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         console.error('Error searching documents:', error);
         return [];
       }
-      return (data as Document[]) || [];
+      return data || [];
     } catch (error) {
       console.error('Error searching documents:', error);
       return [];
@@ -333,8 +333,8 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
     loadingMore,
     hasMore,
     totalCount,
-    addDocument: addDocument as (document: Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => Promise<{ data: Document | null; error: any }>,
-    updateDocument: updateDocument as (id: string, updates: Partial<Document>) => Promise<{ data: Document | null; error: any }>,
+    addDocument,
+    updateDocument,
     deleteDocument,
     clearAllDocuments,
     refreshDocuments,
