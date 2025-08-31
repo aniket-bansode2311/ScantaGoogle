@@ -1,6 +1,5 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import createContextHook from '@nkzw/create-context-hook';
 
 export type OCRLanguage = 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'auto';
 
@@ -22,7 +21,18 @@ export const OCR_LANGUAGES: OCRLanguageOption[] = [
 
 const OCR_LANGUAGE_KEY = '@ocr_language';
 
-export const [OCRSettingsProvider, useOCRSettings] = createContextHook(() => {
+interface OCRSettingsContextType {
+  selectedLanguage: OCRLanguage;
+  isLoading: boolean;
+  languages: OCRLanguageOption[];
+  setLanguage: (language: OCRLanguage) => Promise<void>;
+  getLanguageName: (code: OCRLanguage) => string;
+  getLanguageNativeName: (code: OCRLanguage) => string;
+}
+
+const OCRSettingsContext = createContext<OCRSettingsContextType | undefined>(undefined);
+
+export function OCRSettingsProvider({ children }: { children: React.ReactNode }) {
   const [selectedLanguage, setSelectedLanguage] = useState<OCRLanguage>('auto');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -68,7 +78,7 @@ export const [OCRSettingsProvider, useOCRSettings] = createContextHook(() => {
     return language ? language.nativeName : 'Auto-detect';
   }, []);
 
-  return useMemo(() => ({
+  const value = useMemo(() => ({
     selectedLanguage,
     isLoading,
     languages: OCR_LANGUAGES,
@@ -76,4 +86,18 @@ export const [OCRSettingsProvider, useOCRSettings] = createContextHook(() => {
     getLanguageName,
     getLanguageNativeName,
   }), [selectedLanguage, isLoading, saveLanguagePreference, getLanguageName, getLanguageNativeName]);
-});
+
+  return (
+    <OCRSettingsContext.Provider value={value}>
+      {children}
+    </OCRSettingsContext.Provider>
+  );
+}
+
+export function useOCRSettings() {
+  const context = useContext(OCRSettingsContext);
+  if (context === undefined) {
+    throw new Error('useOCRSettings must be used within an OCRSettingsProvider');
+  }
+  return context;
+}
