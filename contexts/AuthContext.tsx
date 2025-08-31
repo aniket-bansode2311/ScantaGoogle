@@ -1,5 +1,4 @@
-import createContextHook from '@nkzw/create-context-hook';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { auth, type User } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { startMetric, endMetric } from '@/lib/performance';
@@ -13,7 +12,9 @@ interface AuthContextType {
   signOut: () => Promise<void>;
 }
 
-export const [AuthProvider, useAuth] = createContextHook((): AuthContextType => {
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,7 +136,7 @@ export const [AuthProvider, useAuth] = createContextHook((): AuthContextType => 
     setLoading(false);
   }, []);
 
-  return useMemo(() => ({
+  const value = useMemo(() => ({
     user,
     session,
     loading,
@@ -143,4 +144,18 @@ export const [AuthProvider, useAuth] = createContextHook((): AuthContextType => 
     signUp,
     signOut,
   }), [user, session, loading, signIn, signUp, signOut]);
-});
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
