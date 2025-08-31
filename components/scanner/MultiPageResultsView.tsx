@@ -7,7 +7,8 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
-import { Edit3, Copy, ArrowLeft, Sparkles, FileText } from 'lucide-react-native';
+import { Edit3, Copy, ArrowLeft, Sparkles, FileText, Download } from 'lucide-react-native';
+import { showExportOptions } from '@/lib/exportUtils';
 import { DocumentPage } from '@/types/scan';
 
 interface MultiPageResultsViewProps {
@@ -33,6 +34,10 @@ export default function MultiPageResultsView({
     .join('\n\n');
 
   const processedPages = pages.filter(page => page.extractedText).length;
+  
+  const handleExport = () => {
+    showExportOptions(combinedText, 'multi-page-document');
+  };
 
   return (
     <Animated.View 
@@ -75,6 +80,13 @@ export default function MultiPageResultsView({
         >
           <Copy size={18} color="#34C759" />
           <Text style={[styles.fullWidthActionButtonText, { color: '#34C759' }]}>Copy All Text</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.fullWidthActionButton, styles.exportActionButton]}
+          onPress={handleExport}
+        >
+          <Download size={18} color="#007AFF" />
+          <Text style={[styles.fullWidthActionButtonText, { color: '#007AFF' }]}>Export Document</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.fullWidthActionButton, styles.backActionButton]}
@@ -178,6 +190,9 @@ const styles = StyleSheet.create({
   },
   backActionButton: {
     backgroundColor: '#FFE8E8',
+  },
+  exportActionButton: {
+    backgroundColor: '#E3F2FD',
   },
   textContainer: {
     backgroundColor: '#F8F9FA',

@@ -6,7 +6,8 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { Edit3, Copy, ArrowLeft, Sparkles, Plus, PenTool } from 'lucide-react-native';
+import { Edit3, Copy, ArrowLeft, Sparkles, Plus, PenTool, Download } from 'lucide-react-native';
+import { showExportOptions } from '@/lib/exportUtils';
 
 interface ResultsViewProps {
   extractedText: string;
@@ -31,6 +32,9 @@ export default function ResultsView({
   sparkleAnim,
   slideAnim,
 }: ResultsViewProps) {
+  const handleExport = () => {
+    showExportOptions(extractedText, 'scanned-document');
+  };
   return (
     <Animated.View 
       style={[
@@ -74,6 +78,13 @@ export default function ResultsView({
         >
           <Copy size={18} color="#34C759" />
           <Text style={[styles.fullWidthActionButtonText, { color: '#34C759' }]}>Copy to Clipboard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.fullWidthActionButton, styles.exportActionButton]}
+          onPress={handleExport}
+        >
+          <Download size={18} color="#007AFF" />
+          <Text style={[styles.fullWidthActionButtonText, { color: '#007AFF' }]}>Export Document</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.fullWidthActionButton, styles.multiPageActionButton]}
@@ -192,6 +203,9 @@ const styles = StyleSheet.create({
   },
   signatureActionButton: {
     backgroundColor: "#F3E8FF",
+  },
+  exportActionButton: {
+    backgroundColor: "#E3F2FD",
   },
   textContainer: {
     backgroundColor: "#F8F9FA",

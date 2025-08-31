@@ -154,6 +154,135 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
     setSegments(newSegments);
   }, [segments, selectionStart, selectionEnd]);
 
+  const exportAsTXT = async () => {
+    try {
+      setIsExporting(true);
+      
+      // Get plain text content
+      const plainText = getFullText();
+      const fileName = `scanned-document-${Date.now()}.txt`;
+      
+      if (Platform.OS === 'web') {
+        // For web, create and download TXT file
+        const blob = new Blob([plainText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        Alert.alert('Success', 'Document exported as TXT file!');
+      } else {
+        // For mobile, save as text file
+        const fileUri = FileSystem.documentDirectory + fileName;
+        await FileSystem.writeAsStringAsync(fileUri, plainText);
+        
+        if (Platform.OS === 'ios') {
+          await Share.share({ url: fileUri });
+        } else {
+          const { status } = await MediaLibrary.requestPermissionsAsync();
+          if (status === 'granted') {
+            await MediaLibrary.saveToLibraryAsync(fileUri);
+            Alert.alert('Success', 'Document saved as TXT file!');
+          } else {
+            await Share.share({ url: fileUri });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error exporting TXT:', error);
+      Alert.alert('Error', 'Failed to export TXT file. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const exportAsDOC = async () => {
+    try {
+      setIsExporting(true);
+      
+      // Create RTF content (Rich Text Format) which can be opened by Word
+      let rtfContent = '{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Times New Roman;}}\\f0\\fs24 ';
+      
+      // Process each segment with formatting
+      segments.forEach(segment => {
+        let segmentRtf = segment.text.replace(/\n/g, '\\par ');
+        
+        // Apply formatting
+        if (segment.style.bold) {
+          segmentRtf = `{\\b ${segmentRtf}}`;
+        }
+        if (segment.style.italic) {
+          segmentRtf = `{\\i ${segmentRtf}}`;
+        }
+        if (segment.style.underline) {
+          segmentRtf = `{\\ul ${segmentRtf}}`;
+        }
+        
+        // Font size (RTF uses half-points)
+        if (segment.style.fontSize) {
+          const rtfSize = FONT_SIZES[segment.style.fontSize] * 2;
+          segmentRtf = `{\\fs${rtfSize} ${segmentRtf}}`;
+        }
+        
+        // Text alignment
+        if (segment.style.align === 'center') {
+          segmentRtf = `{\\qc ${segmentRtf}}`;
+        } else if (segment.style.align === 'right') {
+          segmentRtf = `{\\qr ${segmentRtf}}`;
+        }
+        
+        rtfContent += segmentRtf;
+      });
+      
+      // Add signatures placeholder
+      if (signatures.length > 0) {
+        rtfContent += '\\par\\par {\\qr [Signature(s) attached]}';
+      }
+      
+      rtfContent += '}';
+      
+      const fileName = `scanned-document-${Date.now()}.rtf`;
+      
+      if (Platform.OS === 'web') {
+        // For web, create and download RTF file
+        const blob = new Blob([rtfContent], { type: 'application/rtf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        Alert.alert('Success', 'Document exported as RTF file (opens in Word)!');
+      } else {
+        // For mobile, save as RTF file
+        const fileUri = FileSystem.documentDirectory + fileName;
+        await FileSystem.writeAsStringAsync(fileUri, rtfContent);
+        
+        if (Platform.OS === 'ios') {
+          await Share.share({ url: fileUri });
+        } else {
+          const { status } = await MediaLibrary.requestPermissionsAsync();
+          if (status === 'granted') {
+            await MediaLibrary.saveToLibraryAsync(fileUri);
+            Alert.alert('Success', 'Document saved as RTF file (opens in Word)!');
+          } else {
+            await Share.share({ url: fileUri });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error exporting DOC:', error);
+      Alert.alert('Error', 'Failed to export DOC file. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const exportAsPDF = async () => {
     try {
       setIsExporting(true);
@@ -220,7 +349,7 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
         </html>
       `;
 
-      // For web, create and download PDF
+      // For web, create and download HTML file
       if (Platform.OS === 'web') {
         const blob = new Blob([htmlContent], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
@@ -233,11 +362,11 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
         URL.revokeObjectURL(url);
         Alert.alert('Success', 'Document exported as HTML file!');
       } else {
-        // For mobile, save as text file
-        const fileName = `scanned-document-${Date.now()}.txt`;
+        // For mobile, save as HTML file
+        const fileName = `scanned-document-${Date.now()}.html`;
         const fileUri = FileSystem.documentDirectory + fileName;
         
-        await FileSystem.writeAsStringAsync(fileUri, getFullText());
+        await FileSystem.writeAsStringAsync(fileUri, htmlContent);
         
         if (Platform.OS === 'ios') {
           await Share.share({ url: fileUri });
@@ -245,14 +374,14 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
           const { status } = await MediaLibrary.requestPermissionsAsync();
           if (status === 'granted') {
             await MediaLibrary.saveToLibraryAsync(fileUri);
-            Alert.alert('Success', 'Document saved to your device!');
+            Alert.alert('Success', 'Document saved as HTML file!');
           } else {
             await Share.share({ url: fileUri });
           }
         }
       }
     } catch (error) {
-      console.error('Error exporting PDF:', error);
+      console.error('Error exporting HTML:', error);
       Alert.alert('Error', 'Failed to export document. Please try again.');
     } finally {
       setIsExporting(false);
@@ -309,7 +438,9 @@ export default function TextFormatter({ initialText, onBack, documentId }: TextF
       'Export Document',
       'Choose export format:',
       [
-        { text: 'PDF/Text', onPress: exportAsPDF },
+        { text: 'TXT (Plain Text)', onPress: exportAsTXT },
+        { text: 'DOC (Word Format)', onPress: exportAsDOC },
+        { text: 'HTML (Web Format)', onPress: exportAsPDF },
         { text: 'PNG Image', onPress: () => exportAsImage('png') },
         { text: 'JPG Image', onPress: () => exportAsImage('jpg') },
         { text: 'Cancel', style: 'cancel' },
