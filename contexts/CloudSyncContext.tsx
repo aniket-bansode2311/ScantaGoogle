@@ -1,7 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Import the hook functions instead of the context providers
 import { useAuth } from './AuthContext';
 import { useDocuments } from './DocumentContext';
 
@@ -39,34 +37,44 @@ export function CloudSyncProvider({ children }: { children: React.ReactNode }) {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const mountedRef = useRef(true);
 
-  // Load settings from AsyncStorage
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     loadSettings();
   }, []);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       const stored = await AsyncStorage.getItem(CLOUD_SYNC_STORAGE_KEY);
-      if (stored) {
+      if (stored && mountedRef.current) {
         const parsedSettings = JSON.parse(stored);
         setSettings(parsedSettings);
       }
     } catch (error) {
       console.error('Failed to load cloud sync settings:', error);
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, []);
 
-  const saveSettings = async (newSettings: CloudSyncSettings) => {
+  const saveSettings = useCallback(async (newSettings: CloudSyncSettings) => {
     try {
       await AsyncStorage.setItem(CLOUD_SYNC_STORAGE_KEY, JSON.stringify(newSettings));
-      setSettings(newSettings);
+      if (mountedRef.current) {
+        setSettings(newSettings);
+      }
     } catch (error) {
       console.error('Failed to save cloud sync settings:', error);
     }
-  };
+  }, []);
 
   const toggleAutoSync = useCallback(async () => {
     const newSettings = {
@@ -74,15 +82,16 @@ export function CloudSyncProvider({ children }: { children: React.ReactNode }) {
       autoSync: !settings.autoSync,
     };
     await saveSettings(newSettings);
-  }, [settings]);
+  }, [settings, saveSettings]);
 
   const performManualSync = useCallback(async () => {
-    if (!user) return;
+    if (!user || !mountedRef.current) return;
     
     setIsSyncing(true);
     try {
-      // Simulate sync process
       await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      if (!mountedRef.current) return;
       
       const newSettings = {
         ...settings,
@@ -93,22 +102,21 @@ export function CloudSyncProvider({ children }: { children: React.ReactNode }) {
       console.error('Sync failed:', error);
       throw error;
     } finally {
-      setIsSyncing(false);
+      if (mountedRef.current) {
+        setIsSyncing(false);
+      }
     }
-  }, [user, settings]);
+  }, [user, settings, saveSettings]);
 
-  // Calculate storage usage based on documents
   const getStorageUsage = useCallback((): CloudStorageUsage => {
-    // Estimate document size (rough calculation)
     const estimatedSize = documents.reduce((total, doc) => {
-      // Estimate: text content + metadata + images
-      const textSize = (doc.content?.length || 0) * 2; // 2 bytes per character
-      const imageSize = doc.image_url ? 500 * 1024 : 0; // 500KB per image
+      const textSize = (doc.content?.length || 0) * 2;
+      const imageSize = doc.image_url ? 500 * 1024 : 0;
       return total + textSize + imageSize;
     }, 0);
 
-    const usedMB = Math.round(estimatedSize / (1024 * 1024) * 100) / 100; // Convert to MB with 2 decimal places
-    const totalMB = 1024; // 1GB total storage
+    const usedMB = Math.round(estimatedSize / (1024 * 1024) * 100) / 100;
+    const totalMB = 1024;
     const percentage = Math.min((usedMB / totalMB) * 100, 100);
 
     return {
