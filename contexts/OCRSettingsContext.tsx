@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type OCRLanguage = 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'auto';
@@ -35,25 +35,33 @@ const OCRSettingsContext = createContext<OCRSettingsContextType | undefined>(und
 export function OCRSettingsProvider({ children }: { children: React.ReactNode }) {
   const [selectedLanguage, setSelectedLanguage] = useState<OCRLanguage>('auto');
   const [isLoading, setIsLoading] = useState(true);
+  const mountedRef = useRef(true);
 
-  const isValidLanguage = (language: string): boolean => {
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const isValidLanguage = useCallback((language: string): boolean => {
     return OCR_LANGUAGES.some(lang => lang.code === language);
-  };
+  }, []);
 
   const loadLanguagePreference = useCallback(async () => {
     try {
       const savedLanguage = await AsyncStorage.getItem(OCR_LANGUAGE_KEY);
-      if (savedLanguage && isValidLanguage(savedLanguage)) {
+      if (savedLanguage && isValidLanguage(savedLanguage) && mountedRef.current) {
         setSelectedLanguage(savedLanguage as OCRLanguage);
       }
     } catch (error) {
       console.error('Error loading OCR language preference:', error);
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, []);
+  }, [isValidLanguage]);
 
-  // Load saved language preference on mount
   useEffect(() => {
     loadLanguagePreference();
   }, [loadLanguagePreference]);
@@ -61,7 +69,9 @@ export function OCRSettingsProvider({ children }: { children: React.ReactNode })
   const saveLanguagePreference = useCallback(async (language: OCRLanguage) => {
     try {
       await AsyncStorage.setItem(OCR_LANGUAGE_KEY, language);
-      setSelectedLanguage(language);
+      if (mountedRef.current) {
+        setSelectedLanguage(language);
+      }
     } catch (error) {
       console.error('Error saving OCR language preference:', error);
       throw error;
