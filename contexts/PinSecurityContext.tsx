@@ -1,5 +1,4 @@
-import createContextHook from '@nkzw/create-context-hook';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, AppStateStatus } from 'react-native';
 
@@ -32,7 +31,9 @@ const hashPin = (pin: string): string => {
   return hash.toString();
 };
 
-export const [PinSecurityProvider, usePinSecurity] = createContextHook((): PinSecurityContextType => {
+const PinSecurityContext = createContext<PinSecurityContextType | undefined>(undefined);
+
+export function PinSecurityProvider({ children }: { children: React.ReactNode }) {
   const [isPinEnabled, setIsPinEnabled] = useState<boolean>(false);
   const [isPinRequired, setIsPinRequired] = useState<boolean>(false);
   const [isSettingUp, setIsSettingUp] = useState<boolean>(false);
@@ -155,7 +156,7 @@ export const [PinSecurityProvider, usePinSecurity] = createContextHook((): PinSe
     setIsSettingUp(false);
   }, []);
 
-  return useMemo(() => ({
+  const value = useMemo(() => ({
     isPinEnabled,
     isPinRequired,
     isSettingUp,
@@ -178,4 +179,18 @@ export const [PinSecurityProvider, usePinSecurity] = createContextHook((): PinSe
     startPinSetup,
     cancelPinSetup,
   ]);
-});
+
+  return (
+    <PinSecurityContext.Provider value={value}>
+      {children}
+    </PinSecurityContext.Provider>
+  );
+}
+
+export function usePinSecurity() {
+  const context = useContext(PinSecurityContext);
+  if (context === undefined) {
+    throw new Error('usePinSecurity must be used within a PinSecurityProvider');
+  }
+  return context;
+}
