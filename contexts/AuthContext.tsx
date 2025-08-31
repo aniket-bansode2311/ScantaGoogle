@@ -21,9 +21,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let subscription: any = null;
     
-    // Defer initial auth check to improve cold start
     const initAuth = async () => {
+      if (!mounted) return;
+      
       startMetric('Auth Initialization');
       try {
         // Use faster session check first
@@ -50,29 +52,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     };
-    
-    // Start auth initialization immediately but don't block
-    initAuth();
 
     // Listen for auth changes
-    const { data: { subscription } } = auth.onAuthStateChange((event, session) => {
-      if (!mounted) return;
+    const setupAuthListener = () => {
+      const { data: { subscription: authSubscription } } = auth.onAuthStateChange((event, session) => {
+        if (!mounted) return;
+        
+        console.log('Auth state changed:', event, session?.user?.id);
+        
+        if (session?.user) {
+          setUser(session.user as User);
+          setSession(session);
+        } else {
+          setUser(null);
+          setSession(null);
+        }
+        setLoading(false);
+      });
       
-      console.log('Auth state changed:', event, session?.user?.id);
-      
-      if (session?.user) {
-        setUser(session.user as User);
-        setSession(session);
-      } else {
-        setUser(null);
-        setSession(null);
-      }
-      setLoading(false);
-    });
+      subscription = authSubscription;
+    };
+    
+    // Start auth initialization
+    setupAuthListener();
+    initAuth();
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 
@@ -83,7 +92,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (error) {
         console.log('Signin error:', error);
-        setLoading(false);
         return { error };
       }
       
@@ -93,12 +101,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(data.session);
       }
       
-      setLoading(false);
       return { error: null };
     } catch (err) {
       console.error('Signin catch error:', err);
-      setLoading(false);
       return { error: { message: 'Failed to sign in. Please try again.' } };
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -109,7 +117,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (error) {
         console.log('Signup error:', error);
-        setLoading(false);
         return { error };
       }
       
@@ -119,21 +126,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(data.session);
       }
       
-      setLoading(false);
       return { error: null };
     } catch (err) {
       console.error('Signup catch error:', err);
-      setLoading(false);
       return { error: { message: 'Failed to create account. Please try again.' } };
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   const signOut = useCallback(async () => {
     setLoading(true);
-    await auth.signOut();
-    setUser(null);
-    setSession(null);
-    setLoading(false);
+    try {
+      await auth.signOut();
+      setUser(null);
+      setSession(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const value = useMemo(() => ({
