@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import {
@@ -13,27 +13,16 @@ import {
 import { useDocuments } from './DocumentContext';
 
 interface DocumentEditingContextType {
-  // Annotation management
   annotations: Annotation[];
   addAnnotation: (annotation: Omit<Annotation, 'id' | 'createdAt'>) => void;
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
   deleteAnnotation: (id: string) => void;
   clearAnnotations: () => void;
-  
-  // Document merging
   mergeDocuments: (documents: MultiPageDocument[], options: DocumentMergeOptions) => Promise<MultiPageDocument | null>;
-  
-  // Document splitting
   splitDocument: (document: MultiPageDocument, options: DocumentSplitOptions) => Promise<MultiPageDocument[] | null>;
-  
-  // PDF export
   exportToPDF: (document: AnnotatedDocument, options: PDFExportOptions) => Promise<string | null>;
-  
-  // Page operations
   duplicatePage: (page: DocumentPage) => DocumentPage;
   rotatePage: (pageId: string, degrees: number) => void;
-  
-  // Utility functions
   isProcessing: boolean;
   setProcessing: (processing: boolean) => void;
 }
@@ -44,8 +33,17 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const { addDocument, updateDocument } = useDocuments();
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const addAnnotation = useCallback((annotation: Omit<Annotation, 'id' | 'createdAt'>) => {
+    if (!mountedRef.current) return;
+
     let newAnnotation: Annotation;
     
     const baseAnnotation = {
@@ -54,7 +52,6 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
       createdAt: new Date(),
     };
     
-    // Type-safe annotation creation based on type
     switch (annotation.type) {
       case 'highlight':
         newAnnotation = {
@@ -92,10 +89,11 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
   }, []);
 
   const updateAnnotation = useCallback((id: string, updates: Partial<Annotation>) => {
+    if (!mountedRef.current) return;
+
     setAnnotations(prev => 
       prev.map(annotation => {
         if (annotation.id === id) {
-          // Ensure type safety when updating
           return { ...annotation, ...updates } as Annotation;
         }
         return annotation;
@@ -105,11 +103,15 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
   }, []);
 
   const deleteAnnotation = useCallback((id: string) => {
+    if (!mountedRef.current) return;
+
     setAnnotations(prev => prev.filter(annotation => annotation.id !== id));
     console.log('🗑️ Deleted annotation:', id);
   }, []);
 
   const clearAnnotations = useCallback(() => {
+    if (!mountedRef.current) return;
+
     setAnnotations([]);
     console.log('🧹 Cleared all annotations');
   }, []);
@@ -123,17 +125,17 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
       return null;
     }
 
+    if (!mountedRef.current) return null;
+
     setIsProcessing(true);
     
     try {
       console.log(`🔗 Merging ${documents.length} documents...`);
       
-      // Collect all pages in the specified order
       const allPages: DocumentPage[] = [];
       let pageOrder = 0;
       
       for (const pageId of options.pageOrder) {
-        // Find the page across all documents
         for (const document of documents) {
           const page = document.pages.find(p => p.id === pageId);
           if (page) {
@@ -150,13 +152,11 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
         throw new Error('No valid pages found for merging');
       }
       
-      // Create merged document
       const mergedDocument: Omit<MultiPageDocument, 'id' | 'createdAt' | 'updatedAt'> = {
         title: options.title,
         pages: allPages,
       };
       
-      // Save to database (store pages in content for now)
       const { data: savedDocument, error } = await addDocument({
         title: options.title,
         content: allPages.map(p => p.extractedText || '').join('\n\n'),
@@ -186,7 +186,9 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
       Alert.alert('Error', 'Failed to merge documents. Please try again.');
       return null;
     } finally {
-      setIsProcessing(false);
+      if (mountedRef.current) {
+        setIsProcessing(false);
+      }
     }
   }, [addDocument, annotations]);
 
@@ -199,23 +201,22 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
       return null;
     }
 
+    if (!mountedRef.current) return null;
+
     setIsProcessing(true);
     
     try {
       console.log(`✂️ Splitting document: ${document.title}`);
       
-      // Extract selected pages
       const extractedPages = document.pages
         .filter(page => options.pagesToExtract.includes(page.id))
         .map((page, index) => ({ ...page, order: index }));
       
-      // Create new document with extracted pages
       const newDocument: Omit<MultiPageDocument, 'id' | 'createdAt' | 'updatedAt'> = {
         title: options.newDocumentTitle,
         pages: extractedPages,
       };
       
-      // Save new document
       const { data: savedDocument, error } = await addDocument({
         title: options.newDocumentTitle,
         content: extractedPages.map(p => p.extractedText || '').join('\n\n'),
@@ -227,7 +228,6 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
         throw new Error('Failed to save split document');
       }
       
-      // Update original document (remove extracted pages)
       const remainingPages = document.pages
         .filter(page => !options.pagesToExtract.includes(page.id))
         .map((page, index) => ({ ...page, order: index }));
@@ -262,7 +262,9 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
       Alert.alert('Error', 'Failed to split document. Please try again.');
       return null;
     } finally {
-      setIsProcessing(false);
+      if (mountedRef.current) {
+        setIsProcessing(false);
+      }
     }
   }, [addDocument, updateDocument]);
 
@@ -270,20 +272,17 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
     document: AnnotatedDocument, 
     options: PDFExportOptions
   ): Promise<string | null> => {
+    if (!mountedRef.current) return null;
+
     setIsProcessing(true);
     
     try {
       console.log(`📄 Exporting document to PDF: ${document.title}`);
       
-      // For now, we'll create a simple image-based PDF using view-shot
-      // In a real implementation, you'd use a proper PDF library
-      
       const pdfPages: string[] = [];
       
       for (const page of document.pages) {
         try {
-          // This would capture each page as an image
-          // In practice, you'd render the page with annotations
           const pageUri = page.imageUri;
           pdfPages.push(pageUri);
         } catch (error) {
@@ -295,11 +294,8 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
         throw new Error('No pages could be processed for PDF export');
       }
       
-      // Create a simple multi-page document reference
       const pdfPath = `${FileSystem.documentDirectory}${document.title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`;
       
-      // Note: This is a placeholder. In a real implementation, you'd use a PDF library
-      // to combine the images into a proper PDF with annotations
       console.log(`📄 PDF would be created at: ${pdfPath}`);
       console.log(`📊 PDF options:`, options);
       
@@ -316,7 +312,9 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
       Alert.alert('Error', 'Failed to export document to PDF. Please try again.');
       return null;
     } finally {
-      setIsProcessing(false);
+      if (mountedRef.current) {
+        setIsProcessing(false);
+      }
     }
   }, []);
 
@@ -333,12 +331,12 @@ export function DocumentEditingProvider({ children }: { children: React.ReactNod
 
   const rotatePage = useCallback((pageId: string, degrees: number) => {
     console.log(`🔄 Rotating page ${pageId} by ${degrees} degrees`);
-    // This would be implemented in the page rendering component
-    // For now, we just log the action
   }, []);
 
   const setProcessing = useCallback((processing: boolean) => {
-    setIsProcessing(processing);
+    if (mountedRef.current) {
+      setIsProcessing(processing);
+    }
   }, []);
 
   const value: DocumentEditingContextType = {
