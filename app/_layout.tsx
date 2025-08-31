@@ -6,6 +6,7 @@ import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import AuthGuard from "@/components/AuthGuard";
+import { PinGuard } from "@/components/security";
 import { trpc, trpcClient } from "@/lib/trpc";
 import { startMetric, endMetric, logPerformanceSummary } from "@/lib/performance";
 
@@ -15,6 +16,7 @@ const DocumentEditingProvider = lazy(() => import("@/contexts/DocumentEditingCon
 const SignatureProvider = lazy(() => import("@/contexts/SignatureContext").then(m => ({ default: m.SignatureProvider })));
 const OCRSettingsProvider = lazy(() => import("@/contexts/OCRSettingsContext").then(m => ({ default: m.OCRSettingsProvider })));
 const CloudSyncProvider = lazy(() => import("@/contexts/CloudSyncContext").then(m => ({ default: m.CloudSyncProvider })));
+const PinSecurityProvider = lazy(() => import("@/contexts/PinSecurityContext").then(m => ({ default: m.PinSecurityProvider })));
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -74,17 +76,21 @@ export default function RootLayout() {
           <GestureHandlerRootView style={{ flex: 1 }}>
             <AuthGuard>
               <Suspense fallback={<LoadingFallback />}>
-                <DocumentProvider>
-                  <DocumentEditingProvider>
-                    <CloudSyncProvider>
-                      <SignatureProvider>
-                        <OCRSettingsProvider>
-                          <RootLayoutNav />
-                        </OCRSettingsProvider>
-                      </SignatureProvider>
-                    </CloudSyncProvider>
-                  </DocumentEditingProvider>
-                </DocumentProvider>
+                <PinSecurityProvider>
+                  <PinGuard>
+                    <DocumentProvider>
+                      <DocumentEditingProvider>
+                        <CloudSyncProvider>
+                          <SignatureProvider>
+                            <OCRSettingsProvider>
+                              <RootLayoutNav />
+                            </OCRSettingsProvider>
+                          </SignatureProvider>
+                        </CloudSyncProvider>
+                      </DocumentEditingProvider>
+                    </DocumentProvider>
+                  </PinGuard>
+                </PinSecurityProvider>
               </Suspense>
             </AuthGuard>
           </GestureHandlerRootView>
