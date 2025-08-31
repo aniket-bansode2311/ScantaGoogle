@@ -11,6 +11,7 @@ import { startMetric, endMetric, logPerformanceSummary } from "@/lib/performance
 
 // Lazy load non-essential providers to improve cold start
 const DocumentProvider = lazy(() => import("@/contexts/DocumentContext").then(m => ({ default: m.DocumentProvider })));
+const DocumentEditingProvider = lazy(() => import("@/contexts/DocumentEditingContext").then(m => ({ default: m.DocumentEditingProvider })));
 const SignatureProvider = lazy(() => import("@/contexts/SignatureContext").then(m => ({ default: m.SignatureProvider })));
 const OCRSettingsProvider = lazy(() => import("@/contexts/OCRSettingsContext").then(m => ({ default: m.OCRSettingsProvider })));
 const CloudSyncProvider = lazy(() => import("@/contexts/CloudSyncContext").then(m => ({ default: m.CloudSyncProvider })));
@@ -74,13 +75,15 @@ export default function RootLayout() {
             <AuthGuard>
               <Suspense fallback={<LoadingFallback />}>
                 <DocumentProvider>
-                  <CloudSyncProvider>
-                    <SignatureProvider>
-                      <OCRSettingsProvider>
-                        <RootLayoutNav />
-                      </OCRSettingsProvider>
-                    </SignatureProvider>
-                  </CloudSyncProvider>
+                  <DocumentEditingProvider>
+                    <CloudSyncProvider>
+                      <SignatureProvider>
+                        <OCRSettingsProvider>
+                          <RootLayoutNav />
+                        </OCRSettingsProvider>
+                      </SignatureProvider>
+                    </CloudSyncProvider>
+                  </DocumentEditingProvider>
                 </DocumentProvider>
               </Suspense>
             </AuthGuard>
