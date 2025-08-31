@@ -7,17 +7,18 @@ import {
   Dimensions,
   Animated,
 } from 'react-native';
-import { Camera, Image as ImageIcon, Sparkles } from 'lucide-react-native';
+import { Camera, Image as ImageIcon, Sparkles, Scan } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
 interface EmptyStateProps {
   onTakePhoto: () => void;
   onChooseFromGallery: () => void;
+  onShowModeSelector?: () => void;
   sparkleAnim: Animated.Value;
 }
 
-export default function EmptyState({ onTakePhoto, onChooseFromGallery, sparkleAnim }: EmptyStateProps) {
+export default function EmptyState({ onTakePhoto, onChooseFromGallery, onShowModeSelector, sparkleAnim }: EmptyStateProps) {
   return (
     <View style={styles.emptyState}>
       <View style={styles.emptyIconContainer}>
@@ -65,6 +66,18 @@ export default function EmptyState({ onTakePhoto, onChooseFromGallery, sparkleAn
           </View>
           <Text style={styles.secondaryButtonText}>Choose from Gallery</Text>
         </TouchableOpacity>
+        
+        {onShowModeSelector && (
+          <TouchableOpacity
+            style={[styles.mainActionButton, styles.specialButton]}
+            onPress={onShowModeSelector}
+          >
+            <View style={styles.buttonIconContainer}>
+              <Scan size={22} color="#f59e0b" />
+            </View>
+            <Text style={styles.specialButtonText}>Specialized Scanning</Text>
+          </TouchableOpacity>
+        )}
       </View>
       
       <View style={styles.featuresList}>
@@ -181,6 +194,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#1A1A1A",
+  },
+  specialButton: {
+    backgroundColor: "#fef3c7",
+    borderWidth: 2,
+    borderColor: "#f59e0b",
+  },
+  specialButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#92400e",
   },
   featuresList: {
     marginTop: 40,

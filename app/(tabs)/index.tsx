@@ -16,7 +16,7 @@ import { useOCRSettings } from "@/contexts/OCRSettingsContext";
 import { useOCRWorker } from "@/lib/ocrWorker";
 import ScannerHeader from "@/components/scanner/ScannerHeader";
 import EmptyState from "@/components/scanner/EmptyState";
-import { DocumentPage, SignatureInstance } from "@/types/scan";
+import { DocumentPage, SignatureInstance, ScanMode, IDCardScan, QRCodeScan } from "@/types/scan";
 import { OCRLanguage } from "@/contexts/OCRSettingsContext";
 import { optimizeDocumentImage, OptimizedImageResult } from "@/lib/imageOptimizer";
 import { 
@@ -38,6 +38,9 @@ const SignatureManager = lazy(() => import("@/components/signature/SignatureMana
 const OptimizationOverlay = lazy(() => import("@/components/scanner/OptimizationOverlay"));
 const OCRProgressIndicator = lazy(() => import("@/components/scanner/OCRProgressIndicator"));
 const AdvancedProcessingOverlay = lazy(() => import("@/components/scanner/AdvancedProcessingOverlay"));
+const ScanModeSelector = lazy(() => import("@/components/scanner/ScanModeSelector"));
+const IDCardScanner = lazy(() => import("@/components/scanner/IDCardScanner"));
+const QRCodeScanner = lazy(() => import("@/components/scanner/QRCodeScanner"));
 
 // Loading component for lazy-loaded components
 const ComponentLoader = () => (
@@ -70,6 +73,8 @@ export default function ScannerScreen() {
   const [advancedProcessingStep, setAdvancedProcessingStep] = useState<string>('');
   const [appliedEnhancements, setAppliedEnhancements] = useState<string[]>([]);
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
+  const [currentScanMode, setCurrentScanMode] = useState<ScanMode | null>(null);
+  const [showModeSelector, setShowModeSelector] = useState(false);
   const { addDocument } = useDocuments();
   const { selectedLanguage } = useOCRSettings();
   const { submitTask, getResult, clearResults, isProcessing, queueStatus } = useOCRWorker();
@@ -685,6 +690,82 @@ export default function ScannerScreen() {
     console.log('Document signatures updated:', signatures);
   };
 
+  const handleModeSelect = (mode: ScanMode) => {
+    setCurrentScanMode(mode);
+    setShowModeSelector(false);
+    console.log(`🎯 Selected scan mode: ${mode}`);
+  };
+
+  const handleModeCancel = () => {
+    setShowModeSelector(false);
+    setCurrentScanMode(null);
+  };
+
+  const handleIDCardComplete = (scan: IDCardScan) => {
+    console.log('✅ ID Card scan completed:', scan);
+    Alert.alert(
+      'ID Card Scanned',
+      `Successfully scanned ID card with ${Object.keys(scan.extractedData).length} data fields extracted.`,
+      [
+        { text: 'OK', onPress: () => setCurrentScanMode(null) }
+      ]
+    );
+  };
+
+  const handleQRCodeComplete = (scan: QRCodeScan) => {
+    console.log('✅ QR Code scan completed:', scan);
+    Alert.alert(
+      'QR Code Scanned',
+      `Successfully scanned ${scan.type} QR code: ${scan.data.substring(0, 50)}${scan.data.length > 50 ? '...' : ''}`,
+      [
+        { text: 'OK', onPress: () => setCurrentScanMode(null) }
+      ]
+    );
+  };
+
+  const handleSpecializedScanCancel = () => {
+    setCurrentScanMode(null);
+  };
+
+  const showScanModeSelector = () => {
+    setShowModeSelector(true);
+  };
+
+  // Show mode selector
+  if (showModeSelector) {
+    return (
+      <Suspense fallback={<ComponentLoader />}>
+        <ScanModeSelector
+          onSelectMode={handleModeSelect}
+          onCancel={handleModeCancel}
+        />
+      </Suspense>
+    );
+  }
+
+  // Show specialized scanners
+  if (currentScanMode === 'id-card') {
+    return (
+      <Suspense fallback={<ComponentLoader />}>
+        <IDCardScanner
+          onComplete={handleIDCardComplete}
+          onCancel={handleSpecializedScanCancel}
+        />
+      </Suspense>
+    );
+  }
+
+  if (currentScanMode === 'qr-code') {
+    return (
+      <Suspense fallback={<ComponentLoader />}>
+        <QRCodeScanner
+          onComplete={handleQRCodeComplete}
+          onCancel={handleSpecializedScanCancel}
+        />
+      </Suspense>
+    );
+  }
+
   // Show signature manager
   if (showSignatureManager) {
     return (
@@ -796,6 +877,7 @@ export default function ScannerScreen() {
           <EmptyState
             onTakePhoto={() => pickImage(true)}
             onChooseFromGallery={() => pickImage(false)}
+            onShowModeSelector={showScanModeSelector}
             sparkleAnim={sparkleAnim}
           />
         ) : (

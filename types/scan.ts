@@ -96,3 +96,34 @@ export interface PDFExportOptions {
   pageSize: 'A4' | 'Letter' | 'Legal';
   orientation: 'portrait' | 'landscape';
 }
+
+export type ScanMode = 'document' | 'id-card' | 'qr-code';
+
+export interface IDCardScan {
+  id: string;
+  frontImageUri: string;
+  backImageUri?: string;
+  extractedData: {
+    name?: string;
+    idNumber?: string;
+    dateOfBirth?: string;
+    expiryDate?: string;
+    address?: string;
+    [key: string]: string | undefined;
+  };
+  timestamp: Date;
+}
+
+export interface QRCodeScan {
+  id: string;
+  data: string;
+  type: 'url' | 'text' | 'email' | 'phone' | 'wifi' | 'contact' | 'unknown';
+  timestamp: Date;
+  imageUri?: string;
+}
+
+export interface QRCodeAction {
+  type: 'open' | 'copy' | 'call' | 'email' | 'connect' | 'save';
+  label: string;
+  icon: string;
+}
