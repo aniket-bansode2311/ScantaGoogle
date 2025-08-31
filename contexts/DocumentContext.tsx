@@ -67,9 +67,9 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       } else {
         const newDocs = data || [];
         if (reset) {
-          setDocs(newDocs);
+          setDocs(newDocs || []);
         } else {
-          setDocs(prev => [...prev, ...newDocs]);
+          setDocs(prev => [...prev, ...(newDocs || [])]);
         }
         
         // Check if there are more documents to load
@@ -143,7 +143,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         setDocs(prev => [data, ...prev]);
       }
 
-      return { data, error: null };
+      return { data: data as Document | null, error: null };
     } catch (error) {
       console.error('Error adding document:', error);
       return { data: null, error: { message: 'Failed to add document' } };
@@ -163,7 +163,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
         setDocs(prev => prev.map(doc => doc.id === id ? data : doc));
       }
 
-      return { data, error: null };
+      return { data: data as Document | null, error: null };
     } catch (error) {
       console.error('Error updating document:', error);
       return { data: null, error: { message: 'Failed to update document' } };

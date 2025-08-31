@@ -245,7 +245,7 @@ export const documents = {
         .insert([document])
         .select()
         .single();
-      return { data, error };
+      return { data: data as Document | null, error };
     } catch (err) {
       console.error('Document creation error:', err);
       return { data: null, error: { message: 'Failed to create document' } };
@@ -269,7 +269,7 @@ export const documents = {
       }
       
       const { data, error } = await query;
-      return { data, error };
+      return { data: data as Document[] | null, error };
     } catch (err) {
       console.error('Documents fetch error:', err);
       return { data: null, error: { message: 'Failed to fetch documents' } };
@@ -296,7 +296,7 @@ export const documents = {
         .select('*')
         .eq('id', id)
         .single();
-      return { data, error };
+      return { data: data as Document | null, error };
     } catch (err) {
       console.error('Document fetch error:', err);
       return { data: null, error: { message: 'Failed to fetch document' } };
@@ -311,7 +311,7 @@ export const documents = {
         .eq('id', id)
         .select()
         .single();
-      return { data, error };
+      return { data: data as Document | null, error };
     } catch (err) {
       console.error('Document update error:', err);
       return { data: null, error: { message: 'Failed to update document' } };
@@ -339,7 +339,7 @@ export const documents = {
         .eq('user_id', userId)
         .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
         .order('created_at', { ascending: false });
-      return { data, error };
+      return { data: data as Document[] | null, error };
     } catch (err) {
       console.error('Document search error:', err);
       return { data: null, error: { message: 'Failed to search documents' } };
