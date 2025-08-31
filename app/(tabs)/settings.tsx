@@ -16,7 +16,6 @@ import { useOCRSettings } from "@/contexts/OCRSettingsContext";
 import LanguageSelector from "@/components/LanguageSelector";
 import CloudSyncToggle from "@/components/CloudSyncToggle";
 import SavedSignaturesManager from "@/components/SavedSignaturesManager";
-import { PinSecuritySettings } from "@/components/security";
 
 export default function SettingsScreen() {
   const { clearAllDocuments, documents } = useDocuments();
@@ -138,11 +137,6 @@ export default function SettingsScreen() {
               textColor="#FF3B30"
             />
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Security</Text>
-          <PinSecuritySettings />
         </View>
 
         <View style={styles.section}>

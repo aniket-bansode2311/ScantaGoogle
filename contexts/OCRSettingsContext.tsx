@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import createContextHook from '@nkzw/create-context-hook';
 
 export type OCRLanguage = 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'auto';
 
@@ -21,47 +22,28 @@ export const OCR_LANGUAGES: OCRLanguageOption[] = [
 
 const OCR_LANGUAGE_KEY = '@ocr_language';
 
-interface OCRSettingsContextType {
-  selectedLanguage: OCRLanguage;
-  isLoading: boolean;
-  languages: OCRLanguageOption[];
-  setLanguage: (language: OCRLanguage) => Promise<void>;
-  getLanguageName: (code: OCRLanguage) => string;
-  getLanguageNativeName: (code: OCRLanguage) => string;
-}
-
-const OCRSettingsContext = createContext<OCRSettingsContextType | undefined>(undefined);
-
-export function OCRSettingsProvider({ children }: { children: React.ReactNode }) {
+export const [OCRSettingsProvider, useOCRSettings] = createContextHook(() => {
   const [selectedLanguage, setSelectedLanguage] = useState<OCRLanguage>('auto');
   const [isLoading, setIsLoading] = useState(true);
-  const mountedRef = useRef(true);
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const isValidLanguage = useCallback((language: string): boolean => {
+  const isValidLanguage = (language: string): boolean => {
     return OCR_LANGUAGES.some(lang => lang.code === language);
-  }, []);
+  };
 
   const loadLanguagePreference = useCallback(async () => {
     try {
       const savedLanguage = await AsyncStorage.getItem(OCR_LANGUAGE_KEY);
-      if (savedLanguage && isValidLanguage(savedLanguage) && mountedRef.current) {
+      if (savedLanguage && isValidLanguage(savedLanguage)) {
         setSelectedLanguage(savedLanguage as OCRLanguage);
       }
     } catch (error) {
       console.error('Error loading OCR language preference:', error);
     } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
-  }, [isValidLanguage]);
+  }, []);
 
+  // Load saved language preference on mount
   useEffect(() => {
     loadLanguagePreference();
   }, [loadLanguagePreference]);
@@ -69,9 +51,7 @@ export function OCRSettingsProvider({ children }: { children: React.ReactNode })
   const saveLanguagePreference = useCallback(async (language: OCRLanguage) => {
     try {
       await AsyncStorage.setItem(OCR_LANGUAGE_KEY, language);
-      if (mountedRef.current) {
-        setSelectedLanguage(language);
-      }
+      setSelectedLanguage(language);
     } catch (error) {
       console.error('Error saving OCR language preference:', error);
       throw error;
@@ -88,7 +68,7 @@ export function OCRSettingsProvider({ children }: { children: React.ReactNode })
     return language ? language.nativeName : 'Auto-detect';
   }, []);
 
-  const value = useMemo(() => ({
+  return useMemo(() => ({
     selectedLanguage,
     isLoading,
     languages: OCR_LANGUAGES,
@@ -96,18 +76,4 @@ export function OCRSettingsProvider({ children }: { children: React.ReactNode })
     getLanguageName,
     getLanguageNativeName,
   }), [selectedLanguage, isLoading, saveLanguagePreference, getLanguageName, getLanguageNativeName]);
-
-  return (
-    <OCRSettingsContext.Provider value={value}>
-      {children}
-    </OCRSettingsContext.Provider>
-  );
-}
-
-export function useOCRSettings() {
-  const context = useContext(OCRSettingsContext);
-  if (context === undefined) {
-    throw new Error('useOCRSettings must be used within an OCRSettingsProvider');
-  }
-  return context;
-}
+});

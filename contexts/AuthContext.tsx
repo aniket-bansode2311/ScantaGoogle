@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import createContextHook from '@nkzw/create-context-hook';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { auth, type User } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { startMetric, endMetric } from '@/lib/performance';
@@ -12,20 +13,16 @@ interface AuthContextType {
   signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export const [AuthProvider, useAuth] = createContextHook((): AuthContextType => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    let subscription: any = null;
     
+    // Defer initial auth check to improve cold start
     const initAuth = async () => {
-      if (!mounted) return;
-      
       startMetric('Auth Initialization');
       try {
         // Use faster session check first
@@ -52,36 +49,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     };
+    
+    // Start auth initialization immediately but don't block
+    initAuth();
 
     // Listen for auth changes
-    const setupAuthListener = () => {
-      const { data: { subscription: authSubscription } } = auth.onAuthStateChange((event, session) => {
-        if (!mounted) return;
-        
-        console.log('Auth state changed:', event, session?.user?.id);
-        
-        if (session?.user) {
-          setUser(session.user as User);
-          setSession(session);
-        } else {
-          setUser(null);
-          setSession(null);
-        }
-        setLoading(false);
-      });
+    const { data: { subscription } } = auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
       
-      subscription = authSubscription;
-    };
-    
-    // Start auth initialization
-    setupAuthListener();
-    initAuth();
+      console.log('Auth state changed:', event, session?.user?.id);
+      
+      if (session?.user) {
+        setUser(session.user as User);
+        setSession(session);
+      } else {
+        setUser(null);
+        setSession(null);
+      }
+      setLoading(false);
+    });
 
     return () => {
       mounted = false;
-      if (subscription) {
-        subscription.unsubscribe();
-      }
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -92,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (error) {
         console.log('Signin error:', error);
+        setLoading(false);
         return { error };
       }
       
@@ -101,12 +92,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(data.session);
       }
       
+      setLoading(false);
       return { error: null };
     } catch (err) {
       console.error('Signin catch error:', err);
-      return { error: { message: 'Failed to sign in. Please try again.' } };
-    } finally {
       setLoading(false);
+      return { error: { message: 'Failed to sign in. Please try again.' } };
     }
   }, []);
 
@@ -117,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (error) {
         console.log('Signup error:', error);
+        setLoading(false);
         return { error };
       }
       
@@ -126,27 +118,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(data.session);
       }
       
+      setLoading(false);
       return { error: null };
     } catch (err) {
       console.error('Signup catch error:', err);
-      return { error: { message: 'Failed to create account. Please try again.' } };
-    } finally {
       setLoading(false);
+      return { error: { message: 'Failed to create account. Please try again.' } };
     }
   }, []);
 
   const signOut = useCallback(async () => {
     setLoading(true);
-    try {
-      await auth.signOut();
-      setUser(null);
-      setSession(null);
-    } finally {
-      setLoading(false);
-    }
+    await auth.signOut();
+    setUser(null);
+    setSession(null);
+    setLoading(false);
   }, []);
 
-  const value = useMemo(() => ({
+  return useMemo(() => ({
     user,
     session,
     loading,
@@ -154,18 +143,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
   }), [user, session, loading, signIn, signUp, signOut]);
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
+});

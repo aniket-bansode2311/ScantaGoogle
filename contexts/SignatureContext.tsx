@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SavedSignature } from '@/types/scan';
 
@@ -18,18 +18,11 @@ const SIGNATURES_STORAGE_KEY = '@saved_signatures';
 export function SignatureProvider({ children }: { children: React.ReactNode }) {
   const [signatures, setSignatures] = useState<SavedSignature[]>([]);
   const [loading, setLoading] = useState(true);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   const loadSignatures = async () => {
     try {
       const stored = await AsyncStorage.getItem(SIGNATURES_STORAGE_KEY);
-      if (stored && mountedRef.current) {
+      if (stored) {
         const parsedSignatures = JSON.parse(stored).map((sig: any) => ({
           ...sig,
           createdAt: new Date(sig.createdAt),
@@ -39,9 +32,7 @@ export function SignatureProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Error loading signatures:', error);
     } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   };
 
@@ -66,9 +57,7 @@ export function SignatureProvider({ children }: { children: React.ReactNode }) {
     };
 
     const updatedSignatures = [newSignature, ...signatures];
-    if (mountedRef.current) {
-      setSignatures(updatedSignatures);
-    }
+    setSignatures(updatedSignatures);
     await saveSignaturesToStorage(updatedSignatures);
     
     return newSignature;
@@ -76,9 +65,7 @@ export function SignatureProvider({ children }: { children: React.ReactNode }) {
 
   const deleteSignature = async (id: string) => {
     const updatedSignatures = signatures.filter(sig => sig.id !== id);
-    if (mountedRef.current) {
-      setSignatures(updatedSignatures);
-    }
+    setSignatures(updatedSignatures);
     await saveSignaturesToStorage(updatedSignatures);
   };
 

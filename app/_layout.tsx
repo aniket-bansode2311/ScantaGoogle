@@ -1,22 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
-
+import React, { useEffect, Suspense, lazy } from "react";
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import AuthGuard from "@/components/AuthGuard";
-import { PinGuard } from "@/components/security";
 import { trpc, trpcClient } from "@/lib/trpc";
 import { startMetric, endMetric, logPerformanceSummary } from "@/lib/performance";
 
-// Import providers directly instead of lazy loading to avoid interop issues
-import { DocumentProvider } from "@/contexts/DocumentContext";
-import { DocumentEditingProvider } from "@/contexts/DocumentEditingContext";
-import { SignatureProvider } from "@/contexts/SignatureContext";
-import { OCRSettingsProvider } from "@/contexts/OCRSettingsContext";
-import { CloudSyncProvider } from "@/contexts/CloudSyncContext";
-import { PinSecurityProvider } from "@/contexts/PinSecurityContext";
+// Lazy load non-essential providers to improve cold start
+const DocumentProvider = lazy(() => import("@/contexts/DocumentContext").then(m => ({ default: m.DocumentProvider })));
+const DocumentEditingProvider = lazy(() => import("@/contexts/DocumentEditingContext").then(m => ({ default: m.DocumentEditingProvider })));
+const SignatureProvider = lazy(() => import("@/contexts/SignatureContext").then(m => ({ default: m.SignatureProvider })));
+const OCRSettingsProvider = lazy(() => import("@/contexts/OCRSettingsContext").then(m => ({ default: m.OCRSettingsProvider })));
+const CloudSyncProvider = lazy(() => import("@/contexts/CloudSyncContext").then(m => ({ default: m.CloudSyncProvider })));
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -35,7 +33,12 @@ const queryClient = new QueryClient({
   },
 });
 
-
+// Loading fallback component
+const LoadingFallback = () => (
+  <View style={styles.loadingContainer}>
+    <ActivityIndicator size="large" color="#3b82f6" />
+  </View>
+);
 
 function RootLayoutNav() {
   return (
@@ -70,21 +73,19 @@ export default function RootLayout() {
         <AuthProvider>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <AuthGuard>
-              <PinSecurityProvider>
-                <PinGuard>
-                  <DocumentProvider>
-                    <DocumentEditingProvider>
-                      <CloudSyncProvider>
-                        <SignatureProvider>
-                          <OCRSettingsProvider>
-                            <RootLayoutNav />
-                          </OCRSettingsProvider>
-                        </SignatureProvider>
-                      </CloudSyncProvider>
-                    </DocumentEditingProvider>
-                  </DocumentProvider>
-                </PinGuard>
-              </PinSecurityProvider>
+              <Suspense fallback={<LoadingFallback />}>
+                <DocumentProvider>
+                  <DocumentEditingProvider>
+                    <CloudSyncProvider>
+                      <SignatureProvider>
+                        <OCRSettingsProvider>
+                          <RootLayoutNav />
+                        </OCRSettingsProvider>
+                      </SignatureProvider>
+                    </CloudSyncProvider>
+                  </DocumentEditingProvider>
+                </DocumentProvider>
+              </Suspense>
             </AuthGuard>
           </GestureHandlerRootView>
         </AuthProvider>
@@ -93,4 +94,11 @@ export default function RootLayout() {
   );
 }
 
-
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+});
