@@ -19,6 +19,12 @@ import EmptyState from "@/components/scanner/EmptyState";
 import { DocumentPage, SignatureInstance } from "@/types/scan";
 import { OCRLanguage } from "@/contexts/OCRSettingsContext";
 import { optimizeDocumentImage, OptimizedImageResult } from "@/lib/imageOptimizer";
+import { 
+  fullDocumentEnhancement, 
+  quickDocumentEnhancement, 
+  ProcessingResult,
+  validateDocumentImage 
+} from "@/lib/advancedImageProcessor";
 
 // Lazy load heavy components to improve initial render time
 const TextFormatter = lazy(() => import("@/components/TextFormatter"));
@@ -31,6 +37,7 @@ const ImageEditView = lazy(() => import("@/components/scanner/ImageEditView"));
 const SignatureManager = lazy(() => import("@/components/signature/SignatureManager"));
 const OptimizationOverlay = lazy(() => import("@/components/scanner/OptimizationOverlay"));
 const OCRProgressIndicator = lazy(() => import("@/components/scanner/OCRProgressIndicator"));
+const AdvancedProcessingOverlay = lazy(() => import("@/components/scanner/AdvancedProcessingOverlay"));
 
 // Loading component for lazy-loaded components
 const ComponentLoader = () => (
@@ -59,6 +66,10 @@ export default function ScannerScreen() {
   const [optimizationProgress, setOptimizationProgress] = useState<string>('');
   const [ocrProgress, setOcrProgress] = useState<string>('');
   const [activeOCRTasks, setActiveOCRTasks] = useState<Set<string>>(new Set());
+  const [isAdvancedProcessing, setIsAdvancedProcessing] = useState(false);
+  const [advancedProcessingStep, setAdvancedProcessingStep] = useState<string>('');
+  const [appliedEnhancements, setAppliedEnhancements] = useState<string[]>([]);
+  const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
   const { addDocument } = useDocuments();
   const { selectedLanguage } = useOCRSettings();
   const { submitTask, getResult, clearResults, isProcessing, queueStatus } = useOCRWorker();
@@ -149,27 +160,45 @@ export default function ScannerScreen() {
       if (!result.canceled && result.assets[0]) {
         const imageUri = result.assets[0].uri;
         
-        // Optimize image before editing
-        setIsOptimizingImage(true);
-        setOptimizationProgress('Optimizing image for better OCR...');
+        // Validate and process image with advanced enhancements
+        setIsAdvancedProcessing(true);
+        setAdvancedProcessingStep('Validating image...');
+        setAppliedEnhancements([]);
         
         try {
-          console.log('🚀 Starting image optimization pipeline...');
-          const optimizedResult = await optimizeDocumentImage(imageUri);
+          console.log('🔍 Validating document image...');
+          const validation = await validateDocumentImage(imageUri);
           
-          console.log(`📈 Optimization complete: ${optimizedResult.originalSizeKB}KB → ${optimizedResult.optimizedSizeKB}KB (${(optimizedResult.compressionRatio * 100).toFixed(1)}% of original)`);
+          if (!validation.isValid) {
+            console.warn('⚠️ Image validation issues:', validation.issues);
+            // Still proceed but show warnings
+          }
           
-          // Show image editor with optimized image
-          setImageToEdit(optimizedResult.uri);
-          setShowImageEditor(true);
+          console.log('🚀 Starting advanced document processing...');
+          setAdvancedProcessingStep('Processing document...');
+          
+          // Apply full document enhancement
+          const processingResult = await fullDocumentEnhancement(imageUri);
+          setProcessingResult(processingResult);
+          setAppliedEnhancements(processingResult.appliedEnhancements);
+          setAdvancedProcessingStep('Complete');
+          
+          console.log(`✅ Advanced processing complete in ${processingResult.processingTimeMs}ms`);
+          console.log(`📊 Applied enhancements: ${processingResult.appliedEnhancements.join(', ')}`);
+          
+          // Show image editor with processed image
+          setTimeout(() => {
+            setImageToEdit(processingResult.uri);
+            setShowImageEditor(true);
+            setIsAdvancedProcessing(false);
+          }, 1500); // Show results for a moment
+          
         } catch (error) {
-          console.error('⚠️ Image optimization failed, using original:', error);
-          // Fallback to original image if optimization fails
+          console.error('⚠️ Advanced processing failed, using original:', error);
+          // Fallback to original image if processing fails
           setImageToEdit(imageUri);
           setShowImageEditor(true);
-        } finally {
-          setIsOptimizingImage(false);
-          setOptimizationProgress('');
+          setIsAdvancedProcessing(false);
         }
       }
     } catch (error) {
@@ -470,17 +499,21 @@ export default function ScannerScreen() {
     setShowImageEditor(false);
     setImageToEdit(null);
     
-    // Apply final optimization after editing
-    setIsOptimizingImage(true);
-    setOptimizationProgress('Applying final optimization...');
+    // Apply quick enhancement after editing for final optimization
+    setIsAdvancedProcessing(true);
+    setAdvancedProcessingStep('Final optimization...');
+    setAppliedEnhancements([]);
     
     try {
-      console.log('🔧 Applying final optimization after editing...');
-      const finalOptimizedResult = await optimizeDocumentImage(editedImageUri);
+      console.log('🔧 Applying final enhancement after editing...');
+      const finalProcessingResult = await quickDocumentEnhancement(editedImageUri);
+      setProcessingResult(finalProcessingResult);
+      setAppliedEnhancements(finalProcessingResult.appliedEnhancements);
+      setAdvancedProcessingStep('Complete');
       
-      console.log(`🎯 Final optimization: ${finalOptimizedResult.originalSizeKB}KB → ${finalOptimizedResult.optimizedSizeKB}KB`);
+      console.log(`🎯 Final enhancement: ${finalProcessingResult.originalSizeKB}KB → ${finalProcessingResult.processedSizeKB}KB`);
       
-      const finalImageUri = finalOptimizedResult.uri;
+      const finalImageUri = finalProcessingResult.uri;
       
       if (pages.length === 0) {
         // First image - single page mode
@@ -498,8 +531,8 @@ export default function ScannerScreen() {
         addPageToDocument(finalImageUri);
       }
     } catch (error) {
-      console.error('⚠️ Final optimization failed, using edited image:', error);
-      // Fallback to edited image if final optimization fails
+      console.error('⚠️ Final enhancement failed, using edited image:', error);
+      // Fallback to edited image if final enhancement fails
       if (pages.length === 0) {
         setSelectedImage(editedImageUri);
         setExtractedText("");
@@ -513,8 +546,9 @@ export default function ScannerScreen() {
         addPageToDocument(editedImageUri);
       }
     } finally {
-      setIsOptimizingImage(false);
-      setOptimizationProgress('');
+      setTimeout(() => {
+        setIsAdvancedProcessing(false);
+      }, 1000);
     }
   };
 
@@ -534,17 +568,21 @@ export default function ScannerScreen() {
     setShowImageEditor(false);
     setImageToEdit(null);
     
-    // Apply final optimization after editing existing image
-    setIsOptimizingImage(true);
-    setOptimizationProgress('Optimizing edited image...');
+    // Apply quick enhancement after editing existing image
+    setIsAdvancedProcessing(true);
+    setAdvancedProcessingStep('Enhancing edited image...');
+    setAppliedEnhancements([]);
     
     try {
-      console.log('🔄 Optimizing existing edited image...');
-      const optimizedResult = await optimizeDocumentImage(editedImageUri);
+      console.log('🔄 Enhancing existing edited image...');
+      const enhancementResult = await quickDocumentEnhancement(editedImageUri);
+      setProcessingResult(enhancementResult);
+      setAppliedEnhancements(enhancementResult.appliedEnhancements);
+      setAdvancedProcessingStep('Complete');
       
-      console.log(`✨ Existing image optimized: ${optimizedResult.originalSizeKB}KB → ${optimizedResult.optimizedSizeKB}KB`);
+      console.log(`✨ Existing image enhanced: ${enhancementResult.originalSizeKB}KB → ${enhancementResult.processedSizeKB}KB`);
       
-      setSelectedImage(optimizedResult.uri);
+      setSelectedImage(enhancementResult.uri);
       
       // Re-extract text from the optimized edited image
       setExtractedText("");
@@ -552,10 +590,10 @@ export default function ScannerScreen() {
       setIsDocumentSaved(false);
       
       setTimeout(() => {
-        extractTextFromImage(optimizedResult.uri);
+        extractTextFromImage(enhancementResult.uri);
       }, 100);
     } catch (error) {
-      console.error('⚠️ Optimization of edited image failed:', error);
+      console.error('⚠️ Enhancement of edited image failed:', error);
       // Fallback to edited image
       setSelectedImage(editedImageUri);
       
@@ -567,8 +605,9 @@ export default function ScannerScreen() {
         extractTextFromImage(editedImageUri);
       }, 100);
     } finally {
-      setIsOptimizingImage(false);
-      setOptimizationProgress('');
+      setTimeout(() => {
+        setIsAdvancedProcessing(false);
+      }, 1000);
     }
   };
 
@@ -593,6 +632,10 @@ export default function ScannerScreen() {
     setShowSignatureManager(false);
     setDocumentSignatures([]);
     setOcrProgress('');
+    setIsAdvancedProcessing(false);
+    setAdvancedProcessingStep('');
+    setAppliedEnhancements([]);
+    setProcessingResult(null);
     
     // Reset animations
     sparkleAnim.setValue(0);
@@ -789,6 +832,14 @@ export default function ScannerScreen() {
         <OptimizationOverlay
           visible={isOptimizingImage}
           progress={optimizationProgress}
+        />
+        
+        <AdvancedProcessingOverlay
+          visible={isAdvancedProcessing}
+          currentStep={advancedProcessingStep}
+          appliedEnhancements={appliedEnhancements}
+          processingTimeMs={processingResult?.processingTimeMs}
+          documentBounds={processingResult?.documentBounds}
         />
         
         <OCRProgressIndicator
